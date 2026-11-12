@@ -1,8 +1,6 @@
 /* Opening Coach: board, game flow and panels. */
 (function () {
   const $ = (id) => document.getElementById(id);
-  const GLYPH = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
-  const VS = "︎"; // ask for text glyphs, not emoji
   const STORE_KEY = "openingCoach.games.v1";
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -104,7 +102,7 @@
       if (targets[sq]) cls.push("tgt", targets[sq].captured ? "cap" : "");
       if (checkSq === sq) cls.push("check");
       let inner = "";
-      if (p) inner += `<span class="pc ${p.color}">${GLYPH[p.type]}${VS}</span>`;
+      if (p) inner += Theme.pieceSvg(p.color, p.type);
       if (i >= 56) inner += `<span class="coord f">${sq[0]}</span>`;
       if (i % 8 === 0) inner += `<span class="coord r">${sq[1]}</span>`;
       const name = p ? `${p.color === "w" ? "White" : "Black"} ${({ k: "king", q: "queen", r: "rook", b: "bishop", n: "knight", p: "pawn" })[p.type]} on ${sq}` : sq;
@@ -533,5 +531,6 @@
     if (ev.target.id === "btn-clear-yes") { savedGames = []; saveGames(savedGames); S.confirmClear = false; renderStyle(); }
   });
 
+  Theme.apply();
   newGame();
 })();

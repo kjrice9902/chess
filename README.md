@@ -23,5 +23,6 @@ Pawns always promote to a queen.
 - `js/openings.js` – the opening book (names, ratings, plans)
 - `js/coach.js` – move ratings, checklist and style profile
 - `js/engine.js` – the computer player
+- `js/theme.js` – the wood board, red leather frame and wooden pieces (all drawn in code)
 - `js/app.js` – the board and screens
 - `lib/chess.js` – chess rules ([chess.js](https://github.com/jhlywa/chess.js) 0.10.3, BSD license). One small addition: a `_fast` block near the end that lets the engine search faster.
