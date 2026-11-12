@@ -412,6 +412,25 @@
     afterMove();
   }
 
+  /* ---------- Reset board: same game settings, pieces back to the start, nothing saved ---------- */
+  let resetTimer = null;
+  function resetArmed(on) {
+    S.resetArmed = on;
+    const b = $("btn-reset");
+    b.textContent = on ? "Tap again to reset" : "Reset board";
+    b.classList.toggle("armed", on);
+    clearTimeout(resetTimer);
+    if (on) resetTimer = setTimeout(() => resetArmed(false), 3000);
+  }
+  function resetBoard() {
+    S.game = new Chess(); // a new board object also cancels a computer move that is still thinking
+    S.reviews = [];
+    S.selected = S.last = S.hint = null;
+    S.thinking = S.over = S.saved = false;
+    S.result = null; S.endText = "";
+    afterMove(); // if you play Black, the computer makes its first move again
+  }
+
   /* ---------- Sounds: made in code with Web Audio, no files ---------- */
   const SOUND_KEY = "openingCoach.sound";
   let soundOn = true;
@@ -654,6 +673,8 @@
     else el.textContent = "";
     $("btn-resign").disabled = S.over || friend();
     $("btn-undo").disabled = !S.game.history().length;
+    $("btn-reset").disabled = !S.game.history().length;
+    if (!S.game.history().length) resetArmed(false);
   }
 
   /* ---------- Coach tab ---------- */
@@ -1082,6 +1103,11 @@
   document.addEventListener("touchmove", (e) => { if (e.touches && e.touches.length > 1) e.preventDefault(); }, { passive: false });
   document.addEventListener("wheel", (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false }); // trackpad pinch
   $("btn-undo").addEventListener("click", undo);
+  $("btn-reset").addEventListener("click", () => {
+    if (!S.resetArmed) { resetArmed(true); return; } // first tap asks, second tap resets
+    resetArmed(false);
+    resetBoard();
+  });
   $("btn-hint").addEventListener("click", hint);
   $("btn-resign").addEventListener("click", resign);
   $("btn-flip").addEventListener("click", () => { S.orientation = S.orientation === "w" ? "b" : "w"; render(); });

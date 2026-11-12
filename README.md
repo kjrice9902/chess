@@ -9,6 +9,7 @@ A chess app that helps you fix your openings.
 - **Rates each move**: Great, Good, OK, Questionable or Bad, with a short reason. Out of the known lines, it checks the basic rules: take the center, develop knights and bishops, castle early, do not move the queen or king early, do not move the same piece twice. It also warns you when a move loses material.
 - **Gives you a plan** for the opening you are in, plus a checklist (center pawn, knights out, bishops out, castle, rooks connected).
 - **Hint button** shows the next book move or the best move.
+- **Reset board**: puts the pieces back to the start but keeps your side, opponent and practice line. Nothing is saved to My style. Tap it twice to confirm.
 - **Captured pieces**: the rows above and below the board show the pieces each side has taken, smallest first, plus the material lead (for example +3).
 - **Sounds**: two rising beeps when your king is in check, and falling notes with a low boom on checkmate. Turn them off with the Sound button.
 - **Openings tab**: every opening ranked and color coded: Best (green), Good (light green), Playable (yellow), Risky (orange), Avoid (red). Search, filter by color, and practice any opening. The computer follows the line.
