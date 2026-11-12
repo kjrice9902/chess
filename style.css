@@ -280,3 +280,17 @@ select, input, textarea { font-size: 16px !important; }
 
 /* Reset button waiting for the second tap */
 .btn.armed { background: var(--bad); border-color: var(--bad); color: var(--chip-ink); }
+
+/* Start / continue overlay on the board */
+.board-frame { position: relative; }
+.board.waiting { filter: saturate(0.75) brightness(0.8); }
+.start-overlay {
+  position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; z-index: 5;
+}
+.start-card {
+  background: var(--panel); color: var(--ink); border-radius: 12px; padding: 20px 22px; max-width: 340px; width: 100%;
+  text-align: center; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); display: flex; flex-direction: column; gap: 10px; align-items: center;
+}
+.start-card h2 { margin: 0; font: 800 22px/1.15 var(--font-display); text-wrap: balance; }
+.start-card p { margin: 0; color: var(--muted); font-size: 14px; }
+.btn.big { font-size: 17px; padding: 10px 26px; min-height: 46px; }

@@ -348,7 +348,7 @@
   }
 
   function onSquare(sq) {
-    if (S.over || S.thinking || !isUserTurn()) return;
+    if (S.waiting || S.over || S.thinking || !isUserTurn()) return;
     const g = S.game;
     if (S.selected) {
       const mv = g.moves({ square: S.selected, verbose: true }).find((m) => m.to === sq);
@@ -428,7 +428,8 @@
     S.selected = S.last = S.hint = null;
     S.thinking = S.over = S.saved = false;
     S.result = null; S.endText = "";
-    afterMove(); // if you play Black, the computer makes its first move again
+    S.waiting = true; // wait for Start again
+    afterMove();
   }
 
   /* ---------- Sounds: made in code with Web Audio, no files ---------- */
@@ -489,14 +490,14 @@
   function afterMove() {
     checkEnd();
     render();
-    if (!S.over && !friend() && S.game.turn() !== S.userColor) {
+    if (!S.over && !S.waiting && !friend() && S.game.turn() !== S.userColor) {
       S.thinking = true;
       renderPlayers();
       const token = S.game;
       setTimeout(() => {
         // Skip if a new game started, or the game ended (resign) while waiting.
         if (S.game !== token) return;
-        if (S.over || friend() || S.game.turn() === S.userColor) { S.thinking = false; render(); return; }
+        if (S.over || S.waiting || friend() || S.game.turn() === S.userColor) { S.thinking = false; render(); return; }
         cpuMove();
       }, 300);
     }
@@ -548,13 +549,39 @@
     S.reviews = [];
     S.thinking = S.over = S.saved = false;
     S.result = null; S.endText = "";
+    S.waiting = true; // the game starts when the player presses Start
     setTab("coach");
     afterMove();
   }
 
+  /* ---------- Start / continue ---------- */
+  function startGame() {
+    if (!S.waiting) return;
+    S.waiting = false;
+    unlockAudio();
+    afterMove(); // if you play Black, the computer moves now
+  }
+  function renderStartOverlay() {
+    const el = $("start-overlay");
+    el.hidden = !S.waiting;
+    $("board").classList.toggle("waiting", S.waiting);
+    if (!S.waiting) return;
+    const resume = S.game.history().length > 0;
+    const side = S.userColor === "w" ? "White" : "Black";
+    let info;
+    if (friend()) info = "Two players on this screen. White moves first.";
+    else info = `You play ${side} against the computer (${Engine.LEVELS[S.opp].label}).`;
+    if (S.practice) info += ` Practice: ${S.practice.name}.`;
+    if (!resume && !friend() && S.userColor === "b") info += " The computer moves first.";
+    if (!resume) info += " You can still change the menus above.";
+    $("start-title").textContent = resume ? "Your game is paused" : "Ready to play?";
+    $("start-info").textContent = info;
+    $("btn-start").textContent = resume ? "Continue game" : "Start game";
+  }
+
   /* ---------- Buttons ---------- */
   function undo() {
-    if (S.thinking) return;
+    if (S.thinking || S.waiting) return;
     const g = S.game;
     if (!g.history().length) return;
     g.undo();
@@ -568,7 +595,7 @@
   }
 
   function hint() {
-    if (S.over || S.thinking || !isUserTurn()) return;
+    if (S.waiting || S.over || S.thinking || !isUserTurn()) return;
     const g = S.game;
     const hist = g.history();
     let san = null, why = "";
@@ -601,7 +628,7 @@
   }
 
   function resign() {
-    if (S.over || friend() || !S.game.history().length) return;
+    if (S.waiting || S.over || friend() || !S.game.history().length) return;
     S.over = true;
     S.result = "loss";
     S.endText = "You resigned.";
@@ -669,11 +696,13 @@
     if (S.over) {
       const extra = S.saved ? " Saved to My style." : "";
       el.textContent = S.endText + extra;
-    } else if (S.game.in_check()) el.textContent = "Check!";
+    } else if (S.waiting) el.textContent = S.game.history().length ? "Press Continue game when you are ready." : "Press Start game when you are ready.";
+    else if (S.game.in_check()) el.textContent = "Check!";
     else el.textContent = "";
-    $("btn-resign").disabled = S.over || friend();
-    $("btn-undo").disabled = !S.game.history().length;
-    $("btn-reset").disabled = !S.game.history().length;
+    $("btn-resign").disabled = S.over || S.waiting || friend();
+    $("btn-undo").disabled = S.waiting || !S.game.history().length;
+    $("btn-reset").disabled = S.waiting || !S.game.history().length;
+    $("btn-hint").disabled = S.waiting || S.over;
     if (!S.game.history().length) resetArmed(false);
   }
 
@@ -989,7 +1018,7 @@
   function saveCurrent() {
     const json = JSON.stringify({
       v: 1, moves: S.game.history(), opp: S.opp, userColor: S.userColor, orientation: S.orientation,
-      reviews: S.reviews, over: S.over, result: S.result, endText: S.endText, saved: S.saved, practice: S.practice,
+      reviews: S.reviews, over: S.over, result: S.result, endText: S.endText, saved: S.saved, practice: S.practice, waiting: S.waiting,
     });
     try { localStorage.setItem(CURRENT_KEY, json); } catch (e) { /* storage full or blocked */ }
     scheduleCloudCurrent(json);
@@ -1007,6 +1036,7 @@
     S.orientation = d.orientation === "b" ? "b" : "w";
     S.reviews = Array.isArray(d.reviews) ? d.reviews.filter((r) => r && typeof r === "object" && r.ply < d.moves.length) : [];
     S.over = !!d.over; S.result = d.result || null; S.endText = typeof d.endText === "string" ? d.endText : ""; S.saved = !!d.saved;
+    S.waiting = !S.over; // when the app opens, an unfinished game waits for Continue
     S.practice = d.practice && Array.isArray(d.practice.list) ? { name: String(d.practice.name), list: d.practice.list.map(String), side: d.practice.side === "b" ? "b" : "w" } : null;
     const hv = g.history({ verbose: true });
     S.last = hv[hv.length - 1] || null;
@@ -1056,6 +1086,7 @@
   }
 
   function render() {
+    renderStartOverlay();
     renderReminder();
     renderAlerts();
     saveCurrent();
@@ -1080,6 +1111,11 @@
     if (b) onSquare(b.dataset.sq);
   });
   $("btn-new").addEventListener("click", () => newGame());
+  $("btn-start").addEventListener("click", startGame);
+  // While a new game waits for Start, the menus change it right away.
+  ["opt-color", "opt-opp"].forEach((id) => $(id).addEventListener("change", () => {
+    if (S.waiting && !S.game.history().length) newGame();
+  }));
   document.addEventListener("pointerdown", unlockAudio, true);
   document.addEventListener("keydown", unlockAudio, true);
   $("btn-sound").addEventListener("click", () => {

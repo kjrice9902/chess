@@ -54,7 +54,16 @@
     <section class="board-col" aria-label="Chess board">
       <div class="opening-banner" id="banner"></div>
       <div class="player" id="player-top"></div>
-      <div class="board-frame"><div class="board" id="board" role="grid" aria-label="Board"></div></div>
+      <div class="board-frame">
+        <div class="board" id="board" role="grid" aria-label="Board"></div>
+        <div class="start-overlay" id="start-overlay" hidden>
+          <div class="start-card">
+            <h2 id="start-title">Ready to play?</h2>
+            <p id="start-info"></p>
+            <button class="btn primary big" id="btn-start" type="button">Start game</button>
+          </div>
+        </div>
+      </div>
       <div class="player" id="player-bottom"></div>
       <div class="status" id="status" aria-live="polite"></div>
       <div class="controls">
