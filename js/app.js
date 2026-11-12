@@ -50,12 +50,33 @@
     });
     return out.trim();
   }
+  /* ---------- Opening ratings (one color scale everywhere) ---------- */
+  const TIERS = [
+    { v: "great", label: "Best", desc: "Top choices. Strong players use these the most." },
+    { v: "good", label: "Good", desc: "Solid and reliable." },
+    { v: "ok", label: "Playable", desc: "Fine, but there are better choices." },
+    { v: "dubious", label: "Risky", desc: "Can work, but a careful opponent can punish it." },
+    { v: "bad", label: "Avoid", desc: "Weak. These lose time or weaken your king." },
+  ];
+  const TIER = Object.fromEntries(TIERS.map((t) => [t.v, t]));
+  const tierChip = (v) => `<span class="chip ${v}">${TIER[v].label}</span>`;
+  // One entry per opening name (the shortest line), without the checkmate traps.
+  const OPENINGS = (() => {
+    const seen = new Set(), out = [];
+    for (const e of Book.list) {
+      if (/Mate/.test(e.name) || seen.has(e.name)) continue;
+      seen.add(e.name);
+      out.push(e);
+    }
+    return out;
+  })();
+
   function openingName() {
     const hist = S.game.history();
     if (!hist.length) return { name: null };
     const r = Book.lookup(hist);
     if (!r.named) return { name: "Unknown opening", off: true };
-    return { name: r.named.name, off: !r.inBook };
+    return { name: r.named.name, off: !r.inBook, entry: r.named };
   }
   function practiceOn() {
     if (!S.practice) return false;
@@ -320,7 +341,9 @@
     if (!op.name) {
       html = `<span class="eyebrow">Opening</span><span class="name">${S.practice ? "Practice: " + esc(S.practice.name) : "Make your first move"}</span>`;
     } else {
-      html = `<span class="eyebrow">Opening</span><span class="name">${esc(op.name)}</span>${op.off ? `<span class="off">(left the known lines)</span>` : ""}`;
+      html = `<span class="eyebrow">Opening</span><span class="name">${esc(op.name)}</span>`;
+      if (op.entry && !/Mate/.test(op.entry.name)) html += `${tierChip(op.entry.verdict)}<span class="off">for ${op.entry.side === "w" ? "White" : "Black"}</span>`;
+      if (op.off) html += `<span class="off">(left the known lines)</span>`;
       if (S.practice) html += `<span class="off">Practice: ${esc(S.practice.name)}</span>`;
     }
     $("banner").innerHTML = html;
@@ -405,20 +428,34 @@
   /* ---------- Openings tab ---------- */
   function renderOpenings() {
     const pane = $("pane-openings");
-    const items = Book.list.filter((e) => e.practice && (S.filter === "all" || e.side === S.filter));
-    let html = `<p>Pick an opening and press Practice. The computer follows the line, and the Hint button shows you the next book move.</p>`;
+    let html = `<p>Every opening in the coach's book, ranked from best to worst. Open one to read why, and press Practice to play it against the computer.</p>`;
+    html += `<div class="legend" aria-label="Color key">${TIERS.map((t) => tierChip(t.v)).join("")}</div>`;
     html += `<div class="filters" role="group" aria-label="Filter">${[["all", "All"], ["w", "For White"], ["b", "For Black"]].map(([k, l]) => `<button type="button" data-filter="${k}" aria-pressed="${S.filter === k}">${l}</button>`).join("")}</div>`;
-    items.forEach((e) => {
-      const plan = (e.plan && e.plan[e.side]) || [];
-      html += `<div class="ocard">
-        <div class="head"><h3>${esc(e.name)}</h3><span class="side-tag">For ${e.side === "w" ? "White" : "Black"}</span></div>
-        <div class="line">${esc(formatLine(e.list))}</div>
-        <p>${esc(e.note)}</p>
-        ${plan.length ? `<ol>${plan.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>` : ""}
-        <div><button class="btn" type="button" data-practice="${esc(e.moves)}">Practice as ${e.side === "w" ? "White" : "Black"}</button></div>
-      </div>`;
-    });
+    html += `<input class="search" id="open-search" type="search" placeholder="Search openings, e.g. Sicilian" value="${esc(S.search || "")}" aria-label="Search openings">`;
+    html += `<div id="open-list"></div>`;
     pane.innerHTML = html;
+    renderOpeningList();
+  }
+
+  function renderOpeningList() {
+    const q = (S.search || "").trim().toLowerCase();
+    const items = OPENINGS.filter((e) => (S.filter === "all" || e.side === S.filter) && (!q || e.name.toLowerCase().includes(q) || e.moves.toLowerCase().includes(q)));
+    let html = "";
+    TIERS.forEach((t) => {
+      const group = items.filter((e) => e.verdict === t.v).sort((a, b) => (b.practice ? 1 : 0) - (a.practice ? 1 : 0) || a.ply - b.ply);
+      if (!group.length) return;
+      html += `<section class="tier"><div class="tier-head">${tierChip(t.v)}<span>${group.length} opening${group.length === 1 ? "" : "s"}</span></div><p class="tier-desc">${esc(t.desc)}</p>`;
+      group.forEach((e) => {
+        const plan = (e.plan && e.plan[e.side]) || [];
+        html += `<details class="orow"><summary><span class="dot ${e.verdict}"></span><span class="nm">${esc(e.name)}</span><span class="side-tag">${e.side === "w" ? "White" : "Black"}</span><span class="ln">${esc(formatLine(e.list))}</span></summary>
+          <div class="obody"><p>${esc(e.note)}</p>
+          ${plan.length ? `<ol>${plan.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>` : ""}
+          <div><button class="btn" type="button" data-practice="${esc(e.moves)}" data-side="${e.side}">Practice as ${e.side === "w" ? "White" : "Black"}</button></div></div></details>`;
+      });
+      html += `</section>`;
+    });
+    if (!html) html = `<p class="empty">No openings match your search.</p>`;
+    $("open-list").innerHTML = html;
   }
 
   /* ---------- Style tab ---------- */
@@ -460,7 +497,7 @@
       ${practiceButton(st.black, "b", "As Black vs 1.d4")}</div></div>`;
 
     const R = prof.results;
-    html += `<div class="section"><h4>Results</h4><p>${R.w} wins · ${R.l} losses · ${R.d} draws</p></div>`;
+    html += `<div class="section"><h4>Results</h4><p>${R.w} win${R.w === 1 ? "" : "s"} · ${R.l} loss${R.l === 1 ? "" : "es"} · ${R.d} draw${R.d === 1 ? "" : "s"}</p></div>`;
 
     const firsts = Object.entries(prof.firsts).sort((a, b) => b[1] - a[1]).slice(0, 6);
     if (firsts.length) {
@@ -468,10 +505,34 @@
       firsts.forEach(([k, n]) => (html += `<tr><td>${esc(k)}</td><td class="num">${n}</td></tr>`));
       html += `</tbody></table></div></div>`;
     }
-    const ops = Object.entries(prof.openings).sort((a, b) => b[1].n - a[1].n).slice(0, 10);
-    html += `<div class="section"><h4>Your openings</h4><div class="tablewrap"><table class="rec"><thead><tr><th>Opening</th><th class="num">W</th><th class="num">L</th><th class="num">D</th></tr></thead><tbody>`;
-    ops.forEach(([k, v]) => (html += `<tr><td>${esc(k)}</td><td class="num">${v.w}</td><td class="num">${v.l}</td><td class="num">${v.d}</td></tr>`));
-    html += `</tbody></table></div></div>`;
+    // Your success with each opening: wins count 1, draws count half.
+    const SUCCESS = [
+      { min: 0.6, v: "great", label: "Strong" },
+      { min: 0.4, v: "ok", label: "Mixed" },
+      { min: 0.2, v: "dubious", label: "Weak" },
+      { min: -1, v: "bad", label: "Losing" },
+    ];
+    const ops = Object.entries(prof.openings).map(([name, v]) => {
+      const played = v.w + v.l + v.d;
+      const score = played ? (v.w + v.d / 2) / played : null;
+      const tier = score === null ? null : SUCCESS.find((t) => score >= t.min);
+      return { name, ...v, played, score, tier };
+    }).sort((a, b) => (b.score ?? -2) - (a.score ?? -2) || b.played - a.played);
+    const rated = ops.filter((o) => o.played);
+    html += `<div class="section"><h4>Your most and least successful openings</h4>`;
+    if (!rated.length) {
+      html += `<p class="empty">Finish a game (win, lose or draw) to see which openings work for you.</p>`;
+    } else {
+      const best = rated[0], worst = rated[rated.length - 1];
+      const line = (o, title) => `<div class="succ"><span class="chip ${o.tier.v}">${o.tier.label}</span><div><strong>${title}: ${esc(o.name)}</strong><small>${o.w} win${o.w === 1 ? "" : "s"}, ${o.l} loss${o.l === 1 ? "" : "es"}, ${o.d} draw${o.d === 1 ? "" : "s"} · ${Math.round(o.score * 100)}% score</small></div></div>`;
+      html += line(best, "Most successful");
+      if (rated.length > 1 && worst !== best) html += line(worst, "Least successful");
+      if (rated.length < 2) html += `<p class="empty" style="font-size:13px">Play different openings to compare them.</p>`;
+    }
+    html += `</div>`;
+    html += `<div class="section"><h4>All your openings</h4><div class="tablewrap"><table class="rec"><thead><tr><th>Opening</th><th class="num">W</th><th class="num">L</th><th class="num">D</th><th>Result</th></tr></thead><tbody>`;
+    ops.forEach((o) => (html += `<tr><td><span class="dot ${o.tier ? o.tier.v : ""}"></span>${esc(o.name)}</td><td class="num">${o.w}</td><td class="num">${o.l}</td><td class="num">${o.d}</td><td>${o.tier ? `<span class="chip ${o.tier.v}">${o.tier.label}</span>` : `<span class="empty">Not finished</span>`}</td></tr>`));
+    html += `</tbody></table></div><p class="empty" style="margin:8px 0 0;font-size:13px">Score: a win counts 1, a draw counts half. Strong = 60% or more, Mixed = 40–59%, Weak = 20–39%, Losing = under 20%.</p></div>`;
 
     html += S.confirmClear
       ? `<div class="confirm"><span>Delete all saved games?</span><button class="btn" type="button" id="btn-clear-yes">Yes, delete</button><button class="btn" type="button" id="btn-clear-no">Cancel</button></div>`
@@ -521,6 +582,9 @@
   $("btn-resign").addEventListener("click", resign);
   $("btn-flip").addEventListener("click", () => { S.orientation = S.orientation === "w" ? "b" : "w"; render(); });
   ["coach", "openings", "style"].forEach((k) => $("tab-" + k).addEventListener("click", () => setTab(k)));
+  $("pane-openings").addEventListener("input", (ev) => {
+    if (ev.target.id === "open-search") { S.search = ev.target.value; renderOpeningList(); }
+  });
   document.querySelector(".panel").addEventListener("click", (ev) => {
     const f = ev.target.closest("[data-filter]");
     if (f) { S.filter = f.dataset.filter; renderOpenings(); return; }

@@ -9,7 +9,8 @@ A chess app that helps you fix your openings.
 - **Rates each move**: Great, Good, OK, Questionable or Bad, with a short reason. Out of the known lines, it checks the basic rules: take the center, develop knights and bishops, castle early, do not move the queen or king early, do not move the same piece twice. It also warns you when a move loses material.
 - **Gives you a plan** for the opening you are in, plus a checklist (center pawn, knights out, bishops out, castle, rooks connected).
 - **Hint button** shows the next book move or the best move.
-- **Openings tab**: practice a chosen opening. The computer follows the line.
+- **Openings tab**: every opening ranked and color coded: Best (green), Good (light green), Playable (yellow), Risky (orange), Avoid (red). Search, filter by color, and practice any opening. The computer follows the line.
+- **Your success**: the My style tab shows your most and least successful openings, colored by your score: Strong (green), Mixed (yellow), Weak (orange), Losing (red).
 - **My style tab**: after each game, the app saves how you opened. It finds your style (Explorer, Attacker, Builder or Strategist) and suggests openings for White and for Black that fit you.
 
 ## How to run
