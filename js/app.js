@@ -598,10 +598,33 @@
       if (c === S.userColor) return "You";
       return `Computer (${S.opp})`;
     };
+    // Pieces each side has taken, from the move list (en passant counts as a pawn).
+    const taken = { w: [], b: [] };
+    S.game.history({ verbose: true }).forEach((m) => { if (m.captured) taken[m.color].push(m.captured); });
+    const ORDER = { p: 0, n: 1, b: 2, r: 3, q: 4 };
+    const VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+    // Material on the board (counts promotions correctly).
+    const material = { w: 0, b: 0 };
+    S.game.board().forEach((row) => row.forEach((sq) => { if (sq) material[sq.color] += VALUE[sq.type]; }));
+    const NAMES = { p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen" };
+    const takenHtml = (c) => {
+      const list = taken[c].slice().sort((a, b) => ORDER[a] - ORDER[b]);
+      const other = c === "w" ? "b" : "w";
+      const lead = material[c] - material[other];
+      if (!list.length && lead <= 0) return "";
+      const counts = {};
+      list.forEach((t) => (counts[t] = (counts[t] || 0) + 1));
+      const label = Object.keys(counts).map((t) => `${counts[t]} ${NAMES[t]}${counts[t] > 1 ? "s" : ""}`).join(", ");
+      let html = `<span class="taken" role="img" aria-label="Taken: ${label || "nothing"}">`;
+      let prev = null;
+      list.forEach((t) => { html += `<span class="tk${prev === t ? " same" : ""}">${Theme.pieceSvg(other, t)}</span>`; prev = t; });
+      if (lead > 0) html += `<span class="lead">+${lead}</span>`;
+      return html + `</span>`;
+    };
     const line = (c) => {
       const think = S.thinking && c !== S.userColor && !friend() ? `<span class="thinking">thinking...</span>` : "";
       const turn = !S.over && S.game.turn() === c && !think ? "to move" : "";
-      return `<span><strong>${name(c)}</strong> · ${c === "w" ? "White" : "Black"}</span><span>${think || turn}</span>`;
+      return `<span class="who"><span><strong>${name(c)}</strong> · ${c === "w" ? "White" : "Black"}</span>${takenHtml(c)}</span><span class="state">${think || turn}</span>`;
     };
     $("player-top").innerHTML = line(topColor);
     $("player-bottom").innerHTML = line(topColor === "w" ? "b" : "w");
