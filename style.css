@@ -260,3 +260,9 @@ select, input, textarea { font-size: 16px !important; }
 }
 .reminder .rem-text { min-width: 0; flex: 1 1 260px; }
 .reminder .rem-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Storage limit alert */
+.reminder.limit.dubious { background: color-mix(in srgb, var(--dubious) 14%, var(--panel)); border-color: var(--dubious); }
+.reminder.limit.bad { background: color-mix(in srgb, var(--bad) 12%, var(--panel)); border-color: var(--bad); }
+.storage-meter.near .bar span { background: var(--dubious); }
+.storage-meter.full .bar span { background: var(--bad); }

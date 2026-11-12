@@ -3,7 +3,8 @@
   const $ = (id) => document.getElementById(id);
   const STORE_KEY = "openingCoach.games.v1";
   const CURRENT_KEY = "openingCoach.current.v1";
-  const MAX_GAMES = 2000;
+  const MAX_GAMES = 50000;            // games kept on this device
+  const WARN_AT = 0.9, CRITICAL_AT = 0.98;
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
   /* ---------- Storage (may be blocked; never crash) ---------- */
@@ -13,9 +14,77 @@
       return Array.isArray(v) ? v.filter((g) => g && typeof g === "object") : [];
     } catch (e) { return []; }
   }
-  function saveGames(list) {
+  // Big storage (IndexedDB) holds the full list; the small storage (localStorage) keeps a copy while it fits.
+  const storage = { localOk: true, idbOk: null, trimmed: 0, deviceNearlyFull: false, queue: Promise.resolve() };
+  let idbPromise = null;
+  function openIdb() {
+    if (idbPromise) return idbPromise;
+    idbPromise = new Promise((resolve) => {
+      try {
+        const r = indexedDB.open("openingCoach", 1);
+        r.onupgradeneeded = () => r.result.createObjectStore("kv");
+        r.onsuccess = () => resolve(r.result);
+        r.onerror = r.onblocked = () => resolve(null);
+      } catch (e) { resolve(null); }
+    });
+    return idbPromise;
+  }
+  async function idbGet(key) {
+    const db = await openIdb();
+    if (!db) return undefined;
+    return new Promise((resolve) => {
+      try {
+        const req = db.transaction("kv", "readonly").objectStore("kv").get(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(undefined);
+      } catch (e) { resolve(undefined); }
+    });
+  }
+  async function idbSet(key, value) {
+    const db = await openIdb();
+    if (!db) return false;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction("kv", "readwrite");
+        tx.objectStore("kv").put(value, key);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = tx.onabort = () => resolve(false);
+      } catch (e) { resolve(false); }
+    });
+  }
+  // Over the limit: the oldest games go first (the player was warned before this happens).
+  function trimGames() {
+    if (savedGames.length <= MAX_GAMES) return;
+    savedGames.sort((a, b) => a.date - b.date);
+    const extra = savedGames.length - MAX_GAMES;
+    savedGames.splice(0, extra);
+    storage.trimmed += extra;
+  }
+  function saveGames() {
+    trimGames();
     scheduleCloudGames();
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(list.slice(-MAX_GAMES))); return true; } catch (e) { return false; }
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(savedGames)); storage.localOk = true; } catch (e) { storage.localOk = false; }
+    const snapshot = savedGames.slice();
+    storage.queue = storage.queue.then(() => idbSet("games", snapshot)).then((ok) => {
+      storage.idbOk = ok;
+      checkDeviceSpace();
+      renderAlerts();
+    });
+    return storage.localOk || storage.idbOk !== false;
+  }
+  let lastSpaceCheck = 0;
+  function checkDeviceSpace() {
+    if (Date.now() - lastSpaceCheck < 60000) return;
+    lastSpaceCheck = Date.now();
+    try {
+      if (!navigator.storage || !navigator.storage.estimate) return;
+      navigator.storage.estimate().then((e) => {
+        const full = e && e.quota ? e.usage / e.quota : 0;
+        const was = storage.deviceNearlyFull;
+        storage.deviceNearlyFull = full >= 0.9;
+        if (was !== storage.deviceNearlyFull) renderAlerts();
+      }).catch(() => {});
+    } catch (e) { /* ignore */ }
   }
   let savedGames = loadGames();
   // Ask the browser to keep our data and not clean it up (works in most browsers; harmless if refused).
@@ -70,10 +139,14 @@
   // Games are grouped by month, one document each, under data/users/<id>/ (private to that person).
   const cloud = { db: null, uid: null, ready: false, failed: false, written: {}, timer: null, curTimer: null, lastCur: "", busy: Promise.resolve() };
   const monthKey = (g) => "games-" + new Date(g.date).toISOString().slice(0, 7);
+  const CLOUD_CHUNK = 400; // games per cloud document (stays well under the 256 KB document size)
   const cloudCol = () => cloud.db.collection("data/users/" + cloud.uid);
   function cloudQueue(fn) {
     // One write at a time.
-    cloud.busy = cloud.busy.then(fn).catch(() => { cloud.failed = true; });
+    cloud.busy = cloud.busy.then(fn).catch((e) => {
+      cloud.failed = true;
+      if (e && e.code === "quota_exceeded") { cloud.full = true; renderAlerts(); }
+    });
     return cloud.busy;
   }
   function scheduleCloudGames() {
@@ -82,8 +155,13 @@
     cloud.timer = setTimeout(() => cloudQueue(syncCloudGames), 800);
   }
   async function syncCloudGames() {
+    const months = {};
+    savedGames.forEach((g) => { const k = monthKey(g); (months[k] = months[k] || []).push(g); });
     const groups = {};
-    savedGames.forEach((g) => { const k = monthKey(g); (groups[k] = groups[k] || []).push(g); });
+    Object.keys(months).forEach((m) => {
+      const list = months[m].sort((a, b) => a.date - b.date);
+      for (let i = 0; i * CLOUD_CHUNK < list.length; i++) groups[`${m}-${i}`] = list.slice(i * CLOUD_CHUNK, (i + 1) * CLOUD_CHUNK);
+    });
     for (const k of Object.keys(groups)) {
       const body = JSON.stringify(groups[k]);
       if (cloud.written[k] === body) continue;
@@ -95,6 +173,7 @@
       if (!groups[k]) { await cloudCol().doc(k).delete(); delete cloud.written[k]; }
     }
     cloud.failed = false;
+    if (cloud.full) { cloud.full = false; renderAlerts(); }
   }
   function scheduleCloudCurrent(json) {
     if (!cloud.ready) return;
@@ -680,7 +759,9 @@
   function backupSection() {
     const n = savedGames.length;
     let html = `<div class="section backup"><h4>Save and backup</h4>
-      <p class="saved-note"><span class="dot great"></span>Autosaved on this device: ${n} game${n === 1 ? "" : "s"}, plus the game you are playing now.</p>
+      <p class="saved-note"><span class="dot great"></span>Autosaved on this device: ${n.toLocaleString()} game${n === 1 ? "" : "s"}, plus the game you are playing now.</p>
+      <div class="meter storage-meter ${n / MAX_GAMES >= CRITICAL_AT ? "full" : n / MAX_GAMES >= WARN_AT ? "near" : ""}"><span>Storage used</span><span class="bar"><span style="width:${Math.min(100, Math.max(n ? 1 : 0, Math.round((n / MAX_GAMES) * 100)))}%"></span></span><span class="v">${Math.round((n / MAX_GAMES) * 100)}%</span></div>
+      <p class="empty" style="margin:0;font-size:13px">${n.toLocaleString()} of ${MAX_GAMES.toLocaleString()} games. I warn you at 90%.</p>
       <p class="empty" style="margin:0;font-size:13px">Last backup: ${meta.lastBackup ? new Date(meta.lastBackup).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "never"}. I remind you every 5 days.</p>
       ${cloud.ready ? `<p class="saved-note"><span class="dot ${cloud.failed ? "dubious" : "great"}"></span>${cloud.failed ? "Saving to your Claude account is paused. It will try again with your next game." : "Also saved to your Claude account (only you can see it)."}</p>` : ""}
       <p class="empty" style="margin:0;font-size:13px">Data on this device can be lost if you clear your browser, change browser, or use a different link. Download a backup now and then. You can restore it on any device.</p>
@@ -833,6 +914,35 @@
     return true;
   }
 
+  /* ---------- Storage limit alerts ---------- */
+  function limitAlert() {
+    const n = savedGames.length, share = n / MAX_GAMES, pct = Math.round(share * 100);
+    const count = `${n.toLocaleString()} of ${MAX_GAMES.toLocaleString()} games (${pct}%)`;
+    if (storage.localOk === false && storage.idbOk === false)
+      return { key: "save-failed", level: "bad", title: "Your latest games could not be saved.", text: "This device's storage is full or blocked. Download a backup now so you do not lose them." };
+    if (storage.trimmed)
+      return { key: "trimmed", level: "bad", title: "Storage is full.", text: `${storage.trimmed.toLocaleString()} of your oldest games were removed to make room. You have ${count}. Download a backup, then use Clear history to start fresh.` };
+    if (share >= CRITICAL_AT)
+      return { key: "critical", level: "bad", title: "Almost full.", text: `You have ${count}. When it is full, your oldest games are removed to make room. Download a backup now.` };
+    if (share >= WARN_AT)
+      return { key: "warn", level: "dubious", title: "Nearing the game limit.", text: `You have ${count}. Download a backup to keep your oldest games safe.` };
+    if (storage.deviceNearlyFull)
+      return { key: "device", level: "dubious", title: "Your device storage is almost full.", text: "New games may not save. Download a backup and free up some space." };
+    if (cloud.full)
+      return { key: "cloud", level: "dubious", title: "Your Claude account storage for this app is full.", text: "New games still save on this device. Download a backup to keep them safe." };
+    return null;
+  }
+  function renderAlerts() {
+    const el = $("limit-alert");
+    if (!el) return;
+    const a = limitAlert();
+    el.hidden = !a || S.hiddenAlert === a.key;
+    if (el.hidden) return;
+    el.className = `reminder limit ${a.level}`;
+    el.innerHTML = `<div class="rem-text"><strong>${esc(a.title)}</strong> ${esc(a.text)}</div>
+      <div class="rem-actions"><button class="btn primary" type="button" id="limit-download">Download backup</button><button class="btn" type="button" id="limit-hide">Hide for now</button></div>`;
+  }
+
   function renderReminder() {
     const el = $("backup-reminder");
     const due = backupDue();
@@ -846,6 +956,7 @@
 
   function render() {
     renderReminder();
+    renderAlerts();
     saveCurrent();
     renderBoard();
     renderPlayers();
@@ -868,6 +979,10 @@
     if (b) onSquare(b.dataset.sq);
   });
   $("btn-new").addEventListener("click", () => newGame());
+  $("limit-alert").addEventListener("click", (ev) => {
+    if (ev.target.id === "limit-download") exportBackup();
+    if (ev.target.id === "limit-hide") { const a = limitAlert(); S.hiddenAlert = a && a.key; renderAlerts(); }
+  });
   $("backup-reminder").addEventListener("click", (ev) => {
     if (ev.target.id === "rem-download") exportBackup();
     if (ev.target.id === "rem-later") { meta.snoozeUntil = Date.now() + DAY; saveMeta(); renderReminder(); }
@@ -901,7 +1016,7 @@
     if (p) { startPractice(p.dataset.practice, p.dataset.side); return; }
     if (ev.target.id === "btn-clear") { S.confirmClear = true; renderStyle(); }
     if (ev.target.id === "btn-clear-no") { S.confirmClear = false; renderStyle(); }
-    if (ev.target.id === "btn-clear-yes") { savedGames = []; saveGames(savedGames); S.confirmClear = false; S.backupMsg = ""; renderStyle(); }
+    if (ev.target.id === "btn-clear-yes") { savedGames = []; storage.trimmed = 0; saveGames(savedGames); S.confirmClear = false; S.backupMsg = ""; renderStyle(); }
     if (ev.target.id === "btn-export") exportBackup();
     if (ev.target.id === "btn-copy") copyBackup();
     if (ev.target.id === "btn-paste") { S.showPaste = true; S.backupMsg = ""; renderStyle(); $("backup-text").focus(); }
@@ -913,5 +1028,19 @@
   const hadLocalCurrent = restoreCurrent();
   if (hadLocalCurrent) afterMove();
   else newGame();
-  startCloud(hadLocalCurrent);
+  (async () => {
+    // Merge games from big storage (IndexedDB) with the small copy, then connect the cloud.
+    const fromIdb = await idbGet("games");
+    if (Array.isArray(fromIdb)) {
+      const have = new Set(savedGames.map(gameKey));
+      let added = 0;
+      fromIdb.forEach((raw) => {
+        const g = cleanGame(raw);
+        if (g && !have.has(gameKey(g))) { have.add(gameKey(g)); savedGames.push(g); added++; }
+      });
+      if (added) { savedGames.sort((a, b) => a.date - b.date); renderPanel(); }
+    }
+    saveGames(savedGames);
+    await startCloud(hadLocalCurrent);
+  })();
 })();

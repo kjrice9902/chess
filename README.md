@@ -21,6 +21,7 @@ A chess app that helps you fix your openings.
   - **Copy backup**: copies the same data as text, so you can paste it into a note.
   - **Restore from file** or **Paste backup**: adds games from a backup. Games you already have are skipped.
 - On the Claude link, your games are also saved to your Claude account (private to you), so they come back even if the Claude app clears the page.
+- Up to **50,000 games** are kept on your device (in the browser's large storage). A warning appears at 90% full (yellow) and 98% full (red). When it is full, the oldest games are removed to make room, so download a backup first. You also get a warning if your device storage or your Claude account storage runs low.
 - Every 5 days, a reminder at the top of the app asks you to download a backup. "Remind me tomorrow" hides it for one day.
 - Zoom is locked: pinch and double-tap do not zoom the app.
 - Each browser, link and home screen app keeps its own data. Use a backup to move your games between them.
