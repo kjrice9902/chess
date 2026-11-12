@@ -43,6 +43,29 @@
   }
   const gameKey = (g) => [g.date, g.opening, g.result, g.moves].join("|");
 
+  /* ---------- Backup reminder (every 5 days) ---------- */
+  const META_KEY = "openingCoach.meta.v1";
+  const DAY = 864e5, REMIND_EVERY = 5 * DAY;
+  let meta = (() => {
+    try { const m = JSON.parse(localStorage.getItem(META_KEY) || "null"); return m && typeof m === "object" ? m : {}; } catch (e) { return {}; }
+  })();
+  function saveMeta() {
+    try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch (e) { /* ignore */ }
+    scheduleCloudMeta();
+  }
+  if (!meta.since) { meta.since = Date.now(); try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch (e) { /* ignore */ } }
+  function backupDue() {
+    if (!savedGames.length) return false;
+    if (meta.snoozeUntil && Date.now() < meta.snoozeUntil) return false;
+    return Date.now() - (meta.lastBackup || meta.since) >= REMIND_EVERY;
+  }
+  function markBackedUp() {
+    meta.lastBackup = Date.now();
+    meta.snoozeUntil = 0;
+    saveMeta();
+    renderReminder();
+  }
+
   /* ---------- Cloud save: only inside the Claude viewer, private to the signed-in player ---------- */
   // Games are grouped by month, one document each, under data/users/<id>/ (private to that person).
   const cloud = { db: null, uid: null, ready: false, failed: false, written: {}, timer: null, curTimer: null, lastCur: "", busy: Promise.resolve() };
@@ -81,6 +104,11 @@
       cloudQueue(async () => { await cloudCol().doc("current").set({ json }); cloud.lastCur = json; });
     }, 2000);
   }
+  function scheduleCloudMeta() {
+    if (!cloud.ready) return;
+    const body = { since: meta.since || 0, lastBackup: meta.lastBackup || 0 };
+    cloudQueue(() => cloudCol().doc("settings").set(body));
+  }
   async function startCloud(hadLocalCurrent) {
     if (!window.claude || typeof window.claude.use !== "function") return; // not in the Claude viewer
     try {
@@ -95,6 +123,13 @@
       snap.docs.forEach((d) => {
         const body = d.data() || {};
         if (d.id === "current") { cur = typeof body.json === "string" ? body.json : null; return; }
+        if (d.id === "settings") {
+          // Keep the newest backup date and the oldest start date from either place.
+          const lb = Number(body.lastBackup) || 0, since = Number(body.since) || 0;
+          if (lb > (meta.lastBackup || 0)) meta.lastBackup = lb;
+          if (since && since < meta.since) meta.since = since;
+          return;
+        }
         if (!d.id.startsWith("games-") || !Array.isArray(body.games)) return;
         cloud.written[d.id] = JSON.stringify(body.games);
         body.games.forEach((raw) => {
@@ -106,6 +141,8 @@
       cloud.ready = true;
       cloud.lastCur = cur || "";
       saveGames(savedGames); // keeps this device in step and uploads games the cloud is missing
+      saveMeta();
+      renderReminder();
       if (!hadLocalCurrent && cur && !S.game.history().length && restoreCurrent(cur)) { afterMove(); return; }
       if (added || S.tab === "style") renderPanel();
     } catch (e) {
@@ -644,6 +681,7 @@
     const n = savedGames.length;
     let html = `<div class="section backup"><h4>Save and backup</h4>
       <p class="saved-note"><span class="dot great"></span>Autosaved on this device: ${n} game${n === 1 ? "" : "s"}, plus the game you are playing now.</p>
+      <p class="empty" style="margin:0;font-size:13px">Last backup: ${meta.lastBackup ? new Date(meta.lastBackup).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "never"}. I remind you every 5 days.</p>
       ${cloud.ready ? `<p class="saved-note"><span class="dot ${cloud.failed ? "dubious" : "great"}"></span>${cloud.failed ? "Saving to your Claude account is paused. It will try again with your next game." : "Also saved to your Claude account (only you can see it)."}</p>` : ""}
       <p class="empty" style="margin:0;font-size:13px">Data on this device can be lost if you clear your browser, change browser, or use a different link. Download a backup now and then. You can restore it on any device.</p>
       <div class="controls">
@@ -679,6 +717,7 @@
       if (dl) {
         try {
           await dl.save({ filename: name, data: text });
+          markBackedUp();
           return setBackupMsg(`Saved ${name}.`);
         } catch (e) {
           const code = e && e.code;
@@ -692,6 +731,7 @@
     if (phone && file && navigator.canShare && navigator.canShare({ files: [file] })) {
       try {
         await navigator.share({ files: [file], title: name });
+        markBackedUp();
         return setBackupMsg(`Backup shared: ${name}. Choose "Save to Files" to keep it.`);
       } catch (e) {
         if (e && e.name === "AbortError") return;
@@ -703,6 +743,7 @@
       a.href = url; a.download = name;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 4000);
+      markBackedUp();
       setBackupMsg(`Downloaded ${name}. If no file appeared, use Copy backup and paste it into a note.`);
     } catch (e) {
       setBackupMsg("This page cannot download files. Use Copy backup and paste it into a note.");
@@ -722,7 +763,7 @@
     };
     try {
       navigator.clipboard.writeText(text).then(
-        () => setBackupMsg(`Copied ${savedGames.length} games. Paste them into a note or email to keep them safe.`),
+        () => { markBackedUp(); setBackupMsg(`Copied ${savedGames.length} games. Paste them into a note or email to keep them safe.`); },
         fallback);
     } catch (e) { fallback(); }
   }
@@ -792,7 +833,19 @@
     return true;
   }
 
+  function renderReminder() {
+    const el = $("backup-reminder");
+    const due = backupDue();
+    el.hidden = !due;
+    if (!due) return;
+    const n = savedGames.length;
+    const days = meta.lastBackup ? Math.floor((Date.now() - meta.lastBackup) / DAY) : null;
+    el.innerHTML = `<div class="rem-text"><strong>Time to back up your games.</strong> ${days === null ? "You have not saved a backup yet." : `Your last backup was ${days} days ago.`} You have ${n} saved game${n === 1 ? "" : "s"}.</div>
+      <div class="rem-actions"><button class="btn primary" type="button" id="rem-download">Download backup</button><button class="btn" type="button" id="rem-later">Remind me tomorrow</button></div>`;
+  }
+
   function render() {
+    renderReminder();
     saveCurrent();
     renderBoard();
     renderPlayers();
@@ -815,6 +868,15 @@
     if (b) onSquare(b.dataset.sq);
   });
   $("btn-new").addEventListener("click", () => newGame());
+  $("backup-reminder").addEventListener("click", (ev) => {
+    if (ev.target.id === "rem-download") exportBackup();
+    if (ev.target.id === "rem-later") { meta.snoozeUntil = Date.now() + DAY; saveMeta(); renderReminder(); }
+  });
+
+  /* ---------- Zoom lock: no pinch or double-tap zoom ---------- */
+  ["gesturestart", "gesturechange", "gestureend"].forEach((t) => document.addEventListener(t, (e) => e.preventDefault(), { passive: false }));
+  document.addEventListener("touchmove", (e) => { if (e.touches && e.touches.length > 1) e.preventDefault(); }, { passive: false });
+  document.addEventListener("wheel", (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false }); // trackpad pinch
   $("btn-undo").addEventListener("click", undo);
   $("btn-hint").addEventListener("click", hint);
   $("btn-resign").addEventListener("click", resign);

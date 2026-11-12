@@ -247,3 +247,16 @@ table.rec .dot { vertical-align: middle; }
 .filebtn { display: inline-flex; align-items: center; }
 #backup-text { width: 100%; font: 12px var(--font-mono); color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px; resize: vertical; }
 .backup-msg { font-weight: 600; color: var(--accent); }
+
+/* Zoom lock helpers: no double-tap zoom, no auto-zoom when typing (iPhone zooms on text under 16px) */
+html { touch-action: manipulation; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+select, input, textarea { font-size: 16px !important; }
+
+/* Backup reminder */
+.reminder {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px;
+  margin-bottom: 18px; padding: 12px 16px; border-radius: 10px;
+  background: var(--accent-soft); border: 1px solid var(--accent);
+}
+.reminder .rem-text { min-width: 0; flex: 1 1 260px; }
+.reminder .rem-actions { display: flex; flex-wrap: wrap; gap: 8px; }
