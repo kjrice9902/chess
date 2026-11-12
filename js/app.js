@@ -1085,6 +1085,19 @@
       <div class="rem-actions"><button class="btn primary" type="button" id="rem-download">Download backup</button><button class="btn" type="button" id="rem-later">Remind me tomorrow</button></div>`;
   }
 
+  /* On wide screens, line up the top of the side panel with the top of the board. */
+  function alignPanel() {
+    const panel = document.querySelector(".panel");
+    const frame = document.querySelector(".board-frame");
+    const grid = document.querySelector("main.grid");
+    if (!panel || !frame || !grid) return;
+    if (window.matchMedia("(max-width: 900px)").matches) { panel.style.marginTop = ""; return; }
+    const gap = frame.getBoundingClientRect().top - grid.getBoundingClientRect().top;
+    panel.style.marginTop = Math.max(0, Math.round(gap)) + "px";
+  }
+  window.addEventListener("resize", alignPanel);
+  if (window.ResizeObserver) new ResizeObserver(alignPanel).observe(document.querySelector(".board-col"));
+
   function render() {
     renderStartOverlay();
     renderReminder();
@@ -1095,6 +1108,7 @@
     renderBanner();
     renderStatus();
     renderPanel();
+    alignPanel();
   }
 
   function startPractice(moves, sideOverride) {
