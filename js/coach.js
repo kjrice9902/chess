@@ -58,19 +58,22 @@
     if (move.san.indexOf("+") >= 0 || move.san.indexOf("#") >= 0) flags.check = true;
 
     /* ---- Engine check: did the move drop material? ---- */
+    // Sound book moves are trusted: a gambit gives material on purpose.
+    const soundBook = book.inBook && (!book.node.entry || RANK[book.node.entry.verdict] >= RANK.ok);
     let loss = 0, bestSan = null;
     try {
-      const scored = Engine.scoreMoves(fenBefore, 1);
+      const scored = soundBook ? [] : Engine.scoreMoves(fenBefore, 2, 900) || Engine.scoreMoves(fenBefore, 1, 600) || [];
       const best = scored[0];
       const mine = scored.find((s) => s.move.san === move.san);
       if (best && mine) {
         loss = best.score - mine.score;
         bestSan = best.move.san;
+        if (mine.score <= -Engine.MATE + 100 && best.score > -Engine.MATE + 100) flags.allowsMate = true;
       }
     } catch (e) { /* engine is a helper only */ }
     if (move.san.indexOf("#") >= 0) loss = 0;
-    if (loss >= 250) flags.blunder = true;
-    else if (loss >= 120) flags.mistake = true;
+    if (loss >= 200) flags.blunder = true;
+    else if (loss >= 100) flags.mistake = true;
 
     if (book.inBook && book.node.entry) {
       /* ---- Book move ---- */
@@ -104,18 +107,23 @@
       if (flags.edgePawn) { verdict = worse(verdict, "dubious"); warn.push("Edge pawn moves do not help the center or your development."); }
       if (flags.weakening) { verdict = worse(verdict, "dubious"); warn.push("This pawn move weakens the squares around your king."); }
       if (flags.repeat) { verdict = worse(verdict, "dubious"); warn.push("You moved the same piece twice. In the opening, try to move each piece once."); }
-      if (!good.length && !warn.length) good.push("A quiet move. Ask yourself: does it help the center, develop a piece, or keep the king safe?");
+      if (!good.length && !warn.length && !flags.capture) good.push("A quiet move. Ask yourself: does it help the center, develop a piece, or keep the king safe?");
       title = book.named ? `${book.named.name} (you left the known lines)` : "Your own idea";
       text = good.concat(warn).join(" ");
     }
 
-    if (flags.blunder) {
+    if (flags.allowsMate) {
+      verdict = "bad";
+      flags.blunder = true;
+      tips.push(`This lets your opponent checkmate you. A safer move was ${bestSan}.`);
+    } else if (flags.blunder) {
       verdict = "bad";
       tips.push(`This loses material. A safer move was ${bestSan}.`);
     } else if (flags.mistake) {
       verdict = worse(verdict, "dubious");
-      tips.push(`This gives the opponent a chance to win something. ${bestSan} was better.`);
+      tips.push(`This may let your opponent win something. The computer prefers ${bestSan}.`);
     }
+    if (!text) text = flags.capture ? "A capture." : "";
 
     return {
       ply, moveNo, san: move.san, color, verdict, label: LABEL[verdict], title, text, tips,

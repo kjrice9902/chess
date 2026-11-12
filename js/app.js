@@ -280,7 +280,7 @@
       const token = g, ply = hist.length;
       setTimeout(() => {
         if (S.game !== token || g.history().length !== ply || S.over) return;
-        const best = Engine.bestMove(g.fen(), 2).move;
+        const best = Engine.bestMove(g.fen(), 3, 1200).move;
         S.hint = { from: best.from, to: best.to, text: `Try ${best.san}. The computer likes this move best here.` };
         render();
       }, 30);

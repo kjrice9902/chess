@@ -1,6 +1,7 @@
 /*
  * Small chess engine: material + piece-square tables, alpha-beta search,
  * and a short capture search so it does not hang pieces.
+ * It uses the fast internal moves of lib/chess.js (g._fast) and has a time limit.
  */
 (function () {
   const VAL = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 0 };
@@ -20,45 +21,50 @@
         -20,-30,-30,-40,-40,-30,-30,-20, -10,-20,-20,-20,-20,-20,-20,-10, 20,20,0,0,0,0,20,20, 20,30,10,0,0,10,30,20],
   };
   const MATE = 100000;
+  const TIMEOUT = { timeout: true };
 
-  // Score from the side to move.
+  // Score from the side to move. Reads the 0x88 board directly.
   function evaluate(g) {
-    const b = g.board();
+    const b = g._fast.board();
     let s = 0;
-    for (let r = 0; r < 8; r++) {
-      for (let c = 0; c < 8; c++) {
-        const p = b[r][c];
-        if (!p) continue;
-        if (p.color === "w") s += VAL[p.type] + PST[p.type][r * 8 + c];
-        else s -= VAL[p.type] + PST[p.type][(7 - r) * 8 + c];
-      }
+    for (let i = 0; i < 120; i++) {
+      if (i & 0x88) { i += 7; continue; }
+      const p = b[i];
+      if (!p) continue;
+      const r = i >> 4, c = i & 7;
+      if (p.color === "w") s += VAL[p.type] + PST[p.type][r * 8 + c];
+      else s -= VAL[p.type] + PST[p.type][(7 - r) * 8 + c];
     }
     return g.turn() === "w" ? s : -s;
   }
 
-  function moveOrderScore(m) {
+  function orderScore(m) {
     let s = 0;
     if (m.captured) s += 10 * VAL[m.captured] - VAL[m.piece] + 1000;
-    if (m.promotion) s += 800;
-    if (m.san.indexOf("+") >= 0) s += 50;
+    if (m.promotion) s += 800 + VAL[m.promotion];
     return s;
   }
-  const order = (moves) => moves.sort((a, b) => moveOrderScore(b) - moveOrderScore(a));
+  const order = (moves) => moves.sort((a, b) => orderScore(b) - orderScore(a));
 
-  let nodes = 0;
+  let deadline = Infinity, nodes = 0;
+  function tick() {
+    if ((++nodes & 511) === 0 && Date.now() > deadline) throw TIMEOUT;
+  }
+
   function quiesce(g, alpha, beta, qd) {
-    nodes++;
-    // Checkmate found by a capture (for example Qxf7#) must count as a loss, not as material.
-    if (g.in_check() && !g.moves().length) return -MATE;
+    tick();
+    const f = g._fast;
+    // A capture that gives mate (for example Qxf7#) must count as mate, not as material.
+    if (f.inCheck() && !f.moves().length) return -MATE;
     const stand = evaluate(g);
     if (stand >= beta) return beta;
     if (stand > alpha) alpha = stand;
     if (qd >= 4) return alpha;
-    const caps = order(g.moves({ verbose: true }).filter((m) => m.captured || m.promotion));
+    const caps = order(f.moves(true));
     for (const m of caps) {
-      g.move(m);
+      f.make(m);
       const sc = -quiesce(g, -beta, -alpha, qd + 1);
-      g.undo();
+      f.undo();
       if (sc >= beta) return beta;
       if (sc > alpha) alpha = sc;
     }
@@ -66,57 +72,99 @@
   }
 
   function negamax(g, depth, alpha, beta, ply) {
-    nodes++;
-    const moves = g.moves({ verbose: true });
-    if (!moves.length) return g.in_check() ? -MATE + ply : 0;
-    if (g.insufficient_material()) return 0;
-    if (depth === 0) return quiesce(g, alpha, beta, 0);
+    tick();
+    const f = g._fast;
+    const moves = f.moves();
+    if (!moves.length) return f.inCheck() ? -MATE + ply : 0;
+    if (depth <= 0) return quiesce(g, alpha, beta, 0);
     order(moves);
     for (const m of moves) {
-      g.move(m);
+      f.make(m);
       const sc = -negamax(g, depth - 1, -beta, -alpha, ply + 1);
-      g.undo();
+      f.undo();
       if (sc >= beta) return beta;
       if (sc > alpha) alpha = sc;
     }
     return alpha;
   }
 
-  // Score every legal move at the given depth (exact scores, no pruning at root).
-  function scoreMoves(fen, depth) {
-    const g = new Chess(fen);
-    const moves = order(g.moves({ verbose: true }));
+  // Turn an internal move into the normal chess.js move object (with SAN).
+  function toVerbose(g, m, verboseList) {
+    const from = g._fast.algebraic(m.from), to = g._fast.algebraic(m.to);
+    return verboseList.find((v) => v.from === from && v.to === to && (v.promotion || null) === (m.promotion || null));
+  }
+
+  function rootSearch(g, depth, exact, first) {
+    const f = g._fast;
+    const moves = order(f.moves());
+    if (first) {
+      // Search the previous best move first: it makes alpha-beta much faster.
+      const i = moves.findIndex((m) => m.from === first.from && m.to === first.to && m.promotion === first.promotion);
+      if (i > 0) { moves.splice(i, 1); moves.unshift(first); }
+    }
     const out = [];
+    let alpha = -MATE - 1;
     for (const m of moves) {
-      g.move(m);
+      f.make(m);
       let sc;
-      if (g.in_checkmate()) sc = MATE;
-      else if (g.in_draw()) sc = 0;
-      else sc = -negamax(g, depth - 1, -MATE - 1, MATE + 1, 1);
-      g.undo();
-      out.push({ move: m, score: sc });
+      const reply = f.moves();
+      if (!reply.length) sc = f.inCheck() ? MATE : 0;
+      else sc = -negamax(g, depth - 1, -MATE - 1, exact ? MATE + 1 : -alpha, 1);
+      f.undo();
+      out.push({ m, score: sc });
+      if (sc > alpha) alpha = sc;
     }
     out.sort((a, b) => b.score - a.score);
     return out;
   }
 
-  function bestMove(fen, depth) {
+  // Score every legal move (exact scores). Used by the coach.
+  function scoreMoves(fen, depth, timeLimit) {
     const g = new Chess(fen);
-    const moves = order(g.moves({ verbose: true }));
-    let best = null, alpha = -MATE - 1;
-    for (const m of moves) {
-      g.move(m);
-      const sc = g.in_checkmate() ? MATE : -negamax(g, depth - 1, -MATE - 1, -alpha, 1);
-      g.undo();
-      if (sc > alpha || !best) { alpha = sc; best = m; }
+    const verbose = g.moves({ verbose: true });
+    deadline = timeLimit ? Date.now() + timeLimit : Infinity;
+    try {
+      const res = rootSearch(g, depth, true);
+      return res.map((r) => ({ move: toVerbose(g, r.m, verbose), score: r.score }));
+    } catch (e) {
+      if (e !== TIMEOUT) throw e;
+      return null; // too slow: caller skips the check
+    } finally {
+      deadline = Infinity;
     }
-    return { move: best, score: alpha };
+  }
+
+  // Iterative deepening with a time limit. Always returns a legal move.
+  function bestMove(fen, maxDepth, timeLimit) {
+    const g = new Chess(fen);
+    const verbose = g.moves({ verbose: true });
+    if (!verbose.length) return { move: null, score: 0 };
+    let best = null;
+    deadline = timeLimit ? Date.now() + timeLimit : Infinity;
+    try {
+      for (let d = 1; d <= maxDepth; d++) {
+        const res = rootSearch(g, d, false, best && best.m);
+        best = res[0];
+        if (best.score >= MATE - 10) break; // found a mate
+      }
+    } catch (e) {
+      if (e !== TIMEOUT) throw e;
+    } finally {
+      deadline = Infinity;
+    }
+    if (!best) return { move: verbose[0], score: 0 };
+    return { move: toVerbose(g, best.m, verbose), score: best.score };
+  }
+
+  // Any move that mates at once?
+  function mateInOne(g) {
+    return g.moves({ verbose: true }).find((m) => m.san.endsWith("#")) || null;
   }
 
   const LEVELS = {
-    easy: { depth: 1, noise: 90, randomChance: 0.15 },
-    medium: { depth: 2, noise: 25, randomChance: 0 },
-    hard: { depth: 3, noise: 0, randomChance: 0 },
+    easy: { depth: 1, noise: 90, randomChance: 0.15, time: 600 },
+    medium: { depth: 2, noise: 25, randomChance: 0, time: 1200 },
+    hard: { depth: 4, noise: 0, randomChance: 0, time: 1800 },
   };
 
   function choose(fen, level) {
@@ -124,16 +172,19 @@
     const g = new Chess(fen);
     const legal = g.moves({ verbose: true });
     if (!legal.length) return null;
+    const mate = mateInOne(g);
+    if (mate) return mate; // every level takes a mate in one
     if (L.randomChance && Math.random() < L.randomChance) {
       return legal[Math.floor(Math.random() * legal.length)];
     }
     if (L.noise) {
-      const scored = scoreMoves(fen, L.depth);
+      const scored = scoreMoves(fen, L.depth, L.time);
+      if (!scored) return bestMove(fen, 1).move;
       scored.forEach((s) => (s.score += (Math.random() * 2 - 1) * L.noise));
       scored.sort((a, b) => b.score - a.score);
       return scored[0].move;
     }
-    return bestMove(fen, L.depth).move;
+    return bestMove(fen, L.depth, L.time).move;
   }
 
   window.Engine = { evaluate, scoreMoves, bestMove, choose, VAL, MATE };

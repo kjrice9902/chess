@@ -98,11 +98,12 @@ main.grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 420px
 
 .board-frame { width: 100%; max-width: 640px; }
 .board {
-  display: grid; grid-template-columns: repeat(8, 1fr); width: 100%; aspect-ratio: 1; max-width: 100%;
+  display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); grid-template-rows: repeat(8, minmax(0, 1fr)); width: 100%; aspect-ratio: 1; max-width: 100%;
   border: 3px solid var(--ink); border-radius: 4px; overflow: hidden; user-select: none; touch-action: manipulation;
 }
 .sq {
   position: relative; border: 0; padding: 0; margin: 0; cursor: pointer; display: grid; place-items: center;
+  min-width: 0; min-height: 0; overflow: hidden;
   font-family: var(--font-pieces); font-size: clamp(26px, 8.6vw, 58px); line-height: 1;
 }
 @media (min-width: 901px) { .sq { font-size: clamp(30px, 4.6vw, 58px); } }

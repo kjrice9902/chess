@@ -24,4 +24,4 @@ Pawns always promote to a queen.
 - `js/coach.js` – move ratings, checklist and style profile
 - `js/engine.js` – the computer player
 - `js/app.js` – the board and screens
-- `lib/chess.js` – chess rules ([chess.js](https://github.com/jhlywa/chess.js) 0.10.3, BSD license)
+- `lib/chess.js` – chess rules ([chess.js](https://github.com/jhlywa/chess.js) 0.10.3, BSD license). One small addition: a `_fast` block near the end that lets the engine search faster.
