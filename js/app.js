@@ -14,6 +14,7 @@
     } catch (e) { return []; }
   }
   function saveGames(list) {
+    scheduleCloudGames();
     try { localStorage.setItem(STORE_KEY, JSON.stringify(list.slice(-MAX_GAMES))); return true; } catch (e) { return false; }
   }
   let savedGames = loadGames();
@@ -41,6 +42,76 @@
     return out;
   }
   const gameKey = (g) => [g.date, g.opening, g.result, g.moves].join("|");
+
+  /* ---------- Cloud save: only inside the Claude viewer, private to the signed-in player ---------- */
+  // Games are grouped by month, one document each, under data/users/<id>/ (private to that person).
+  const cloud = { db: null, uid: null, ready: false, failed: false, written: {}, timer: null, curTimer: null, lastCur: "", busy: Promise.resolve() };
+  const monthKey = (g) => "games-" + new Date(g.date).toISOString().slice(0, 7);
+  const cloudCol = () => cloud.db.collection("data/users/" + cloud.uid);
+  function cloudQueue(fn) {
+    // One write at a time.
+    cloud.busy = cloud.busy.then(fn).catch(() => { cloud.failed = true; });
+    return cloud.busy;
+  }
+  function scheduleCloudGames() {
+    if (!cloud.ready) return;
+    clearTimeout(cloud.timer);
+    cloud.timer = setTimeout(() => cloudQueue(syncCloudGames), 800);
+  }
+  async function syncCloudGames() {
+    const groups = {};
+    savedGames.forEach((g) => { const k = monthKey(g); (groups[k] = groups[k] || []).push(g); });
+    for (const k of Object.keys(groups)) {
+      const body = JSON.stringify(groups[k]);
+      if (cloud.written[k] === body) continue;
+      await cloudCol().doc(k).set({ games: groups[k] });
+      cloud.written[k] = body;
+    }
+    // Months with no games left (after "Clear history") are removed.
+    for (const k of Object.keys(cloud.written)) {
+      if (!groups[k]) { await cloudCol().doc(k).delete(); delete cloud.written[k]; }
+    }
+    cloud.failed = false;
+  }
+  function scheduleCloudCurrent(json) {
+    if (!cloud.ready) return;
+    clearTimeout(cloud.curTimer);
+    cloud.curTimer = setTimeout(() => {
+      if (json === cloud.lastCur) return;
+      cloudQueue(async () => { await cloudCol().doc("current").set({ json }); cloud.lastCur = json; });
+    }, 2000);
+  }
+  async function startCloud(hadLocalCurrent) {
+    if (!window.claude || typeof window.claude.use !== "function") return; // not in the Claude viewer
+    try {
+      const [db, user] = await Promise.all([window.claude.use("db"), window.claude.use("user")]);
+      if (!db || !user) return;
+      const uid = await user.id();
+      if (!uid) return;
+      cloud.db = db; cloud.uid = uid;
+      const snap = await cloudCol().get();
+      const have = new Set(savedGames.map(gameKey));
+      let added = 0, cur = null;
+      snap.docs.forEach((d) => {
+        const body = d.data() || {};
+        if (d.id === "current") { cur = typeof body.json === "string" ? body.json : null; return; }
+        if (!d.id.startsWith("games-") || !Array.isArray(body.games)) return;
+        cloud.written[d.id] = JSON.stringify(body.games);
+        body.games.forEach((raw) => {
+          const g = cleanGame(raw);
+          if (g && !have.has(gameKey(g))) { have.add(gameKey(g)); savedGames.push(g); added++; }
+        });
+      });
+      savedGames.sort((a, b) => a.date - b.date);
+      cloud.ready = true;
+      cloud.lastCur = cur || "";
+      saveGames(savedGames); // keeps this device in step and uploads games the cloud is missing
+      if (!hadLocalCurrent && cur && !S.game.history().length && restoreCurrent(cur)) { afterMove(); return; }
+      if (added || S.tab === "style") renderPanel();
+    } catch (e) {
+      cloud.failed = true;
+    }
+  }
 
   /* ---------- State ---------- */
   const S = {
@@ -563,7 +634,7 @@
     html += `</tbody></table></div><p class="empty" style="margin:8px 0 0;font-size:13px">Score: a win counts 1, a draw counts half. Strong = 60% or more, Mixed = 40–59%, Weak = 20–39%, Losing = under 20%.</p></div>`;
 
     html += S.confirmClear
-      ? `<div class="confirm"><span>Delete all saved games? Download a backup first if you want to keep them.</span><button class="btn" type="button" id="btn-clear-yes">Yes, delete</button><button class="btn" type="button" id="btn-clear-no">Cancel</button></div>`
+      ? `<div class="confirm"><span>Delete all saved games${cloud.ready ? " here and in your Claude account" : ""}? Download a backup first if you want to keep them.</span><button class="btn" type="button" id="btn-clear-yes">Yes, delete</button><button class="btn" type="button" id="btn-clear-no">Cancel</button></div>`
       : `<div><button class="btn" type="button" id="btn-clear">Clear history</button></div>`;
     pane.innerHTML = html + backupSection();
   }
@@ -573,6 +644,7 @@
     const n = savedGames.length;
     let html = `<div class="section backup"><h4>Save and backup</h4>
       <p class="saved-note"><span class="dot great"></span>Autosaved on this device: ${n} game${n === 1 ? "" : "s"}, plus the game you are playing now.</p>
+      ${cloud.ready ? `<p class="saved-note"><span class="dot ${cloud.failed ? "dubious" : "great"}"></span>${cloud.failed ? "Saving to your Claude account is paused. It will try again with your next game." : "Also saved to your Claude account (only you can see it)."}</p>` : ""}
       <p class="empty" style="margin:0;font-size:13px">Data on this device can be lost if you clear your browser, change browser, or use a different link. Download a backup now and then. You can restore it on any device.</p>
       <div class="controls">
         <button class="btn" type="button" id="btn-export"${n ? "" : " disabled"}>Download backup (.json)</button>
@@ -600,6 +672,22 @@
     let file = null;
     try { file = new File([text], name, { type: "application/json" }); } catch (e) { /* old browser */ }
     // On phones, the share sheet lets you "Save to Files".
+    // Inside the Claude viewer, files go through its own save prompt.
+    if (window.claude && typeof window.claude.use === "function") {
+      let dl = null;
+      try { dl = await window.claude.use("downloads"); } catch (e) { dl = null; }
+      if (dl) {
+        try {
+          await dl.save({ filename: name, data: text });
+          return setBackupMsg(`Saved ${name}.`);
+        } catch (e) {
+          const code = e && e.code;
+          if (code === "declined") return setBackupMsg("Download cancelled.");
+          if (code === "rate_limited") return setBackupMsg("A save window is already open. Try again in a moment.");
+          // other codes: fall through to the normal browser download
+        }
+      }
+    }
     const phone = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
     if (phone && file && navigator.canShare && navigator.canShare({ files: [file] })) {
       try {
@@ -656,7 +744,7 @@
     savedGames.sort((a, b) => a.date - b.date);
     const ok = saveGames(savedGames);
     S.showPaste = false;
-    setBackupMsg(`Restored ${added} game${added === 1 ? "" : "s"}.` + (skipped ? ` ${skipped} were already here.` : "") + (bad ? ` ${bad} could not be read.` : "") + (ok ? "" : " Warning: this device could not save them."));
+    setBackupMsg(`Restored ${added} game${added === 1 ? "" : "s"}.` + (skipped ? ` ${skipped} ${skipped === 1 ? "was" : "were"} already here.` : "") + (bad ? ` ${bad} could not be read.` : "") + (ok ? "" : " Warning: this device could not save them."));
   }
 
   /* ---------- Tabs ---------- */
@@ -676,16 +764,16 @@
 
   /* ---------- Autosave the game in progress ---------- */
   function saveCurrent() {
-    try {
-      localStorage.setItem(CURRENT_KEY, JSON.stringify({
-        v: 1, moves: S.game.history(), opp: S.opp, userColor: S.userColor, orientation: S.orientation,
-        reviews: S.reviews, over: S.over, result: S.result, endText: S.endText, saved: S.saved, practice: S.practice,
-      }));
-    } catch (e) { /* storage full or blocked */ }
+    const json = JSON.stringify({
+      v: 1, moves: S.game.history(), opp: S.opp, userColor: S.userColor, orientation: S.orientation,
+      reviews: S.reviews, over: S.over, result: S.result, endText: S.endText, saved: S.saved, practice: S.practice,
+    });
+    try { localStorage.setItem(CURRENT_KEY, json); } catch (e) { /* storage full or blocked */ }
+    scheduleCloudCurrent(json);
   }
-  function restoreCurrent() {
+  function restoreCurrent(text) {
     let d;
-    try { d = JSON.parse(localStorage.getItem(CURRENT_KEY) || "null"); } catch (e) { return false; }
+    try { d = JSON.parse(text !== undefined ? text : localStorage.getItem(CURRENT_KEY) || "null"); } catch (e) { return false; }
     if (!d || d.v !== 1 || !Array.isArray(d.moves)) return false;
     const g = new Chess();
     for (const san of d.moves) if (!g.move(san)) return false;
@@ -760,6 +848,8 @@
   });
 
   Theme.apply();
-  if (restoreCurrent()) afterMove();
+  const hadLocalCurrent = restoreCurrent();
+  if (hadLocalCurrent) afterMove();
   else newGame();
+  startCloud(hadLocalCurrent);
 })();

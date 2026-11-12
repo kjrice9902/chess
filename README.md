@@ -20,6 +20,7 @@ A chess app that helps you fix your openings.
   - **Download backup (.json)**: saves all your games to one file. On iPhone, choose "Save to Files".
   - **Copy backup**: copies the same data as text, so you can paste it into a note.
   - **Restore from file** or **Paste backup**: adds games from a backup. Games you already have are skipped.
+- On the Claude link, your games are also saved to your Claude account (private to you), so they come back even if the Claude app clears the page.
 - Each browser, link and home screen app keeps its own data. Use a backup to move your games between them.
 
 ## How to run
