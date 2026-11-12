@@ -8,7 +8,10 @@
 
   /* ---------- Storage (may be blocked; never crash) ---------- */
   function loadGames() {
-    try { return JSON.parse(localStorage.getItem(STORE_KEY) || "[]"); } catch (e) { return []; }
+    try {
+      const v = JSON.parse(localStorage.getItem(STORE_KEY) || "[]");
+      return Array.isArray(v) ? v.filter((g) => g && typeof g === "object") : [];
+    } catch (e) { return []; }
   }
   function saveGames(list) {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(list.slice(-200))); } catch (e) { /* ignore */ }
@@ -179,7 +182,13 @@
     if (!S.over && !friend() && S.game.turn() !== S.userColor) {
       S.thinking = true;
       renderPlayers();
-      setTimeout(cpuMove, 300);
+      const token = S.game;
+      setTimeout(() => {
+        // Skip if a new game started, or the game ended (resign) while waiting.
+        if (S.game !== token) return;
+        if (S.over || friend() || S.game.turn() === S.userColor) { S.thinking = false; render(); return; }
+        cpuMove();
+      }, 300);
     }
   }
 
@@ -268,7 +277,9 @@
     let mv = san ? g.moves({ verbose: true }).find((m) => m.san === san) : null;
     if (!mv) {
       $("status").textContent = "Thinking about a hint...";
+      const token = g, ply = hist.length;
       setTimeout(() => {
+        if (S.game !== token || g.history().length !== ply || S.over) return;
         const best = Engine.bestMove(g.fen(), 2).move;
         S.hint = { from: best.from, to: best.to, text: `Try ${best.san}. The computer likes this move best here.` };
         render();

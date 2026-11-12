@@ -48,6 +48,8 @@
   let nodes = 0;
   function quiesce(g, alpha, beta, qd) {
     nodes++;
+    // Checkmate found by a capture (for example Qxf7#) must count as a loss, not as material.
+    if (g.in_check() && !g.moves().length) return -MATE;
     const stand = evaluate(g);
     if (stand >= beta) return beta;
     if (stand > alpha) alpha = stand;

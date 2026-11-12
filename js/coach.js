@@ -16,6 +16,11 @@
     return prevMoves.some((m) => m.to === from);
   }
 
+  // A sound book move (for example 2...Qxd5 in the Scandinavian) is not a bad habit.
+  function clearHabitFlags(flags) {
+    ["earlyQueen", "weakening", "edgePawn", "rim", "repeat", "rookEarly", "kingWalk"].forEach((k) => delete flags[k]);
+  }
+
   /*
    * Review one move.
    *  ctx = { fenBefore, historyBefore (SAN[]), move (verbose), myPrevMoves (verbose[]) }
@@ -76,12 +81,14 @@
       title = e.name;
       text = e.note;
       if (RANK[e.verdict] <= 1) flags.riskyBook = true;
+      else clearHabitFlags(flags);
     } else if (book.inBook) {
       source = "book";
       flags.book = true;
       verdict = "good";
       title = (book.named && book.named.name) || "Book move";
       text = "A main-line move from opening theory.";
+      clearHabitFlags(flags);
     } else {
       /* ---- Out of book: use the principles ---- */
       verdict = "ok";
