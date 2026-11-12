@@ -27,3 +27,10 @@ Pawns always promote to a queen.
 - `js/theme.js` – the wood board, red leather frame and wooden pieces (all drawn in code)
 - `js/app.js` – the board and screens
 - `lib/chess.js` – chess rules ([chess.js](https://github.com/jhlywa/chess.js) 0.10.3, BSD license). One small addition: a `_fast` block near the end that lets the engine search faster.
+
+## Add it to your phone's home screen
+
+The home screen icon only works when the app has its own web address.
+Host this folder on any static web host (for example GitHub Pages), open
+`index.html` there in Safari, then tap Share → Add to Home Screen.
+The knight icon comes from `icons/icon-180.png`.
