@@ -161,22 +161,50 @@
     return g.moves({ verbose: true }).find((m) => m.san.endsWith("#")) || null;
   }
 
+  /*
+   * Opponent levels, weakest to strongest.
+   *  greedy:       looks only at the position right after its own move (never at your reply)
+   *  depth:        how many moves ahead it looks (plus a short capture check)
+   *  noise:        random error added to each move's score, in centipawns (100 = one pawn)
+   *  randomChance: share of moves picked at random
+   *  mateChance:   chance it notices a checkmate in one
+   *  book:         lowest opening-book rating it plays (null = no opening book)
+   *  time:         thinking time limit in ms
+   */
   const LEVELS = {
-    easy: { depth: 1, noise: 90, randomChance: 0.15, time: 600 },
-    medium: { depth: 2, noise: 25, randomChance: 0, time: 1200 },
-    hard: { depth: 4, noise: 0, randomChance: 0, time: 1800 },
+    supereasy:  { label: "super easy",  greedy: true, noise: 150, randomChance: 0.5, mateChance: 0.3, book: null },
+    easy:       { label: "easy",        depth: 1, noise: 90, randomChance: 0.15, mateChance: 1, book: 2, time: 600 },
+    medium:     { label: "medium",      depth: 2, noise: 25, randomChance: 0, mateChance: 1, book: 3, time: 1200 },
+    mediumhard: { label: "medium-hard", depth: 3, noise: 8, randomChance: 0, mateChance: 1, book: 3, time: 1600 },
+    hard:       { label: "hard",        depth: 4, noise: 0, randomChance: 0, mateChance: 1, book: 3, time: 2500 },
   };
+  const LEVEL_ORDER = ["supereasy", "easy", "medium", "mediumhard", "hard"];
+
+  // Super easy: grabs whatever looks best right now and never thinks about your reply.
+  function greedyMove(g, noise) {
+    const f = g._fast;
+    let best = null, bestScore = -Infinity;
+    for (const m of f.moves()) {
+      f.make(m);
+      const s = -evaluate(g) + (Math.random() * 2 - 1) * noise;
+      f.undo();
+      if (s > bestScore) { bestScore = s; best = m; }
+    }
+    return toVerbose(g, best, g.moves({ verbose: true }));
+  }
 
   function choose(fen, level) {
-    const L = LEVELS[level] || LEVELS.medium;
+    if (!LEVELS[level]) throw new Error("Unknown opponent level: " + level);
+    const L = LEVELS[level];
     const g = new Chess(fen);
     const legal = g.moves({ verbose: true });
     if (!legal.length) return null;
     const mate = mateInOne(g);
-    if (mate) return mate; // every level takes a mate in one
+    if (mate && Math.random() < L.mateChance) return mate;
     if (L.randomChance && Math.random() < L.randomChance) {
       return legal[Math.floor(Math.random() * legal.length)];
     }
+    if (L.greedy) return greedyMove(g, L.noise);
     if (L.noise) {
       const scored = scoreMoves(fen, L.depth, L.time);
       if (!scored) return bestMove(fen, 1).move;
@@ -187,5 +215,5 @@
     return bestMove(fen, L.depth, L.time).move;
   }
 
-  window.Engine = { evaluate, scoreMoves, bestMove, choose, VAL, MATE };
+  window.Engine = { evaluate, scoreMoves, bestMove, choose, VAL, MATE, LEVELS, LEVEL_ORDER };
 })();

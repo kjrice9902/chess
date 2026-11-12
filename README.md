@@ -4,7 +4,7 @@ A chess app that helps you fix your openings.
 
 ## What it does
 
-- **Play chess** against the computer (easy, medium, hard) or a friend on the same screen.
+- **Play chess** against the computer (super easy, easy, medium, medium-hard, hard) or a friend on the same screen. Each level is tested to beat the one below it.
 - **Names every opening move.** After each of your moves, the coach shows the name of the opening (Italian Game, Sicilian Defense, London System, and about 230 more lines).
 - **Rates each move**: Great, Good, OK, Questionable or Bad, with a short reason. Out of the known lines, it checks the basic rules: take the center, develop knights and bishops, castle early, do not move the queen or king early, do not move the same piece twice. It also warns you when a move loses material.
 - **Gives you a plan** for the opening you are in, plus a checklist (center pawn, knights out, bishops out, castle, rooks connected).

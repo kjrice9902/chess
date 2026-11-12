@@ -387,9 +387,9 @@
     const before = openingName().name;
     let san = null;
     if (practiceOn()) san = S.practice.list[hist.length];
-    else if (hist.length < 16) {
-      const minRank = S.opp === "easy" ? 2 : 3;
-      const opts = Book.nextMoves(hist).filter((o) => o.entry && Coach.RANK[o.entry.verdict] >= minRank && g.moves().includes(o.san));
+    else if (hist.length < 16 && Engine.LEVELS[S.opp].book !== null) {
+      const minRank = Engine.LEVELS[S.opp].book;
+      const opts = minRank === null ? [] : Book.nextMoves(hist).filter((o) => o.entry && Coach.RANK[o.entry.verdict] >= minRank && g.moves().includes(o.san));
       if (opts.length) {
         const pool = [];
         opts.forEach((o) => { pool.push(o); if (o.entry.verdict === "great") pool.push(o, o); });
@@ -615,7 +615,7 @@
     const name = (c) => {
       if (friend()) return c === "w" ? "White" : "Black";
       if (c === S.userColor) return "You";
-      return `Computer (${S.opp})`;
+      return `Computer (${Engine.LEVELS[S.opp].label})`;
     };
     // Pieces each side has taken, from the move list (en passant counts as a pawn).
     const taken = { w: [], b: [] };
@@ -1000,7 +1000,7 @@
     if (!d || d.v !== 1 || !Array.isArray(d.moves)) return false;
     const g = new Chess();
     for (const san of d.moves) if (!g.move(san)) return false;
-    const opps = ["easy", "medium", "hard", "friend"];
+    const opps = Engine.LEVEL_ORDER.concat(["friend"]);
     S.game = g;
     S.opp = opps.includes(d.opp) ? d.opp : "medium";
     S.userColor = d.userColor === "b" ? "b" : "w";
