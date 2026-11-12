@@ -377,6 +377,7 @@
     }
     S.reviews.push(r);
     S.last = mv; S.selected = null; S.hint = null;
+    moveSound();
     afterMove();
   }
 
@@ -407,7 +408,63 @@
     S.reviews.push(note);
     S.last = mv;
     S.thinking = false;
+    moveSound();
     afterMove();
+  }
+
+  /* ---------- Sounds: made in code with Web Audio, no files ---------- */
+  const SOUND_KEY = "openingCoach.sound";
+  let soundOn = true;
+  try { soundOn = localStorage.getItem(SOUND_KEY) !== "off"; } catch (e) { /* ignore */ }
+  let audio = null;
+  // Browsers only allow sound after a tap or key press, so the sound system starts on the first one.
+  function unlockAudio() {
+    try {
+      if (!audio) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        audio = new AC();
+      }
+      if (audio.state === "suspended") audio.resume();
+    } catch (e) { audio = null; }
+  }
+  function tone(freq, start, dur, type, vol) {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, start);
+    g.gain.setValueAtTime(0.0001, start);
+    g.gain.exponentialRampToValueAtTime(vol, start + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+    o.connect(g);
+    g.connect(audio.destination);
+    o.start(start);
+    o.stop(start + dur + 0.05);
+  }
+  // Check: two short, sharp beeps going up.
+  function playCheck() {
+    const t = audio.currentTime + 0.02;
+    tone(880, t, 0.14, "square", 0.07);
+    tone(1175, t + 0.16, 0.2, "square", 0.07);
+  }
+  // Checkmate: four falling notes, then a low boom.
+  function playMate() {
+    const t = audio.currentTime + 0.02;
+    [784, 659.3, 523.3, 392].forEach((f, i) => tone(f, t + i * 0.17, 0.45, "triangle", 0.18));
+    tone(98, t + 0.7, 1.4, "sine", 0.3);
+    tone(196, t + 0.7, 1.1, "triangle", 0.1);
+  }
+  function moveSound() {
+    if (!soundOn || !audio) return;
+    try {
+      const g = S.game;
+      if (g.in_checkmate()) playMate();
+      else if (g.in_check() && (friend() || g.turn() === S.userColor)) playCheck(); // your king is in check
+    } catch (e) { /* sound is optional */ }
+  }
+  function renderSoundButton() {
+    const b = $("btn-sound");
+    b.textContent = soundOn ? "Sound: on" : "Sound: off";
+    b.setAttribute("aria-pressed", String(soundOn));
   }
 
   function afterMove() {
@@ -979,6 +1036,15 @@
     if (b) onSquare(b.dataset.sq);
   });
   $("btn-new").addEventListener("click", () => newGame());
+  document.addEventListener("pointerdown", unlockAudio, true);
+  document.addEventListener("keydown", unlockAudio, true);
+  $("btn-sound").addEventListener("click", () => {
+    soundOn = !soundOn;
+    try { localStorage.setItem(SOUND_KEY, soundOn ? "on" : "off"); } catch (e) { /* ignore */ }
+    renderSoundButton();
+    if (soundOn && audio) playCheck(); // a short sample so you know it works
+  });
+  renderSoundButton();
   $("limit-alert").addEventListener("click", (ev) => {
     if (ev.target.id === "limit-download") exportBackup();
     if (ev.target.id === "limit-hide") { const a = limitAlert(); S.hiddenAlert = a && a.key; renderAlerts(); }
