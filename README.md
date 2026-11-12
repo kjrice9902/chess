@@ -13,6 +13,15 @@ A chess app that helps you fix your openings.
 - **Your success**: the My style tab shows your most and least successful openings, colored by your score: Strong (green), Mixed (yellow), Weak (orange), Losing (red).
 - **My style tab**: after each game, the app saves how you opened. It finds your style (Explorer, Attacker, Builder or Strategist) and suggests openings for White and for Black that fit you.
 
+## Saving and backups
+
+- Everything saves by itself on your device: every finished game, and every move of the game you are playing now. If you close or reload the page, your game comes back.
+- In **My style → Save and backup** you can:
+  - **Download backup (.json)**: saves all your games to one file. On iPhone, choose "Save to Files".
+  - **Copy backup**: copies the same data as text, so you can paste it into a note.
+  - **Restore from file** or **Paste backup**: adds games from a backup. Games you already have are skipped.
+- Each browser, link and home screen app keeps its own data. Use a backup to move your games between them.
+
 ## How to run
 
 Open `index.html` in a web browser. No install needed. Your game history is saved in your browser.

@@ -239,3 +239,11 @@ table.rec td.num, table.rec th.num { text-align: right; font-variant-numeric: ta
 .succ .chip { margin-top: 2px; }
 .succ small { display: block; color: var(--muted); }
 table.rec .dot { vertical-align: middle; }
+
+/* Backup */
+.backup { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--line); padding-top: 16px; }
+.backup p { margin: 0; }
+.saved-note { font-weight: 600; }
+.filebtn { display: inline-flex; align-items: center; }
+#backup-text { width: 100%; font: 12px var(--font-mono); color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px; resize: vertical; }
+.backup-msg { font-weight: 600; color: var(--accent); }

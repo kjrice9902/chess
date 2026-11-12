@@ -2,6 +2,8 @@
 (function () {
   const $ = (id) => document.getElementById(id);
   const STORE_KEY = "openingCoach.games.v1";
+  const CURRENT_KEY = "openingCoach.current.v1";
+  const MAX_GAMES = 2000;
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
   /* ---------- Storage (may be blocked; never crash) ---------- */
@@ -12,9 +14,33 @@
     } catch (e) { return []; }
   }
   function saveGames(list) {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(list.slice(-200))); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(list.slice(-MAX_GAMES))); return true; } catch (e) { return false; }
   }
   let savedGames = loadGames();
+  // Ask the browser to keep our data and not clean it up (works in most browsers; harmless if refused).
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (e) { /* ignore */ }
+
+  /* ---------- Backup: clean up imported games ---------- */
+  const NUM_FIELDS = ["date", "moves", "openingMoves", "center", "develop", "earlyQueen", "edgePawn", "rim", "repeat", "kingWalk", "rookEarly", "weakening", "book", "riskyBook", "captures", "checks", "blunders"];
+  function cleanGame(g) {
+    if (!g || typeof g !== "object") return null;
+    const out = {};
+    NUM_FIELDS.forEach((k) => { const n = Number(g[k]); out[k] = Number.isFinite(n) && n >= 0 ? n : 0; });
+    if (!out.date) return null;
+    out.color = g.color === "b" ? "b" : "w";
+    out.result = ["win", "loss", "draw", "unfinished"].includes(g.result) ? g.result : "unfinished";
+    out.level = typeof g.level === "string" ? g.level.slice(0, 20) : "";
+    out.firstMove = typeof g.firstMove === "string" ? g.firstMove.slice(0, 10) : null;
+    out.opening = typeof g.opening === "string" ? g.opening.slice(0, 80) : null;
+    const cm = Number(g.castleMove);
+    out.castleMove = Number.isFinite(cm) && cm > 0 ? cm : null;
+    out.verdicts = {};
+    if (g.verdicts && typeof g.verdicts === "object") {
+      ["great", "good", "ok", "dubious", "bad"].forEach((k) => { const n = Number(g.verdicts[k]); if (Number.isFinite(n) && n > 0) out.verdicts[k] = n; });
+    }
+    return out;
+  }
+  const gameKey = (g) => [g.date, g.opening, g.result, g.moves].join("|");
 
   /* ---------- State ---------- */
   const S = {
@@ -33,6 +59,8 @@
     saved: false,
     practice: null,   // opening entry being practiced
     tab: "coach",
+    backupMsg: "",
+    showPaste: false,
     filter: "all",
     confirmClear: false,
   };
@@ -478,7 +506,7 @@
         <li>Do you castle by move 10?</li>
         <li>How often do you play random moves: edge pawns, the same piece twice, early king or queen moves?</li>
         <li>How often do you attack: checks, captures, gambits?</li></ul></div>`;
-      pane.innerHTML = html;
+      pane.innerHTML = html + backupSection();
       return;
     }
     const st = prof.style;
@@ -535,9 +563,100 @@
     html += `</tbody></table></div><p class="empty" style="margin:8px 0 0;font-size:13px">Score: a win counts 1, a draw counts half. Strong = 60% or more, Mixed = 40–59%, Weak = 20–39%, Losing = under 20%.</p></div>`;
 
     html += S.confirmClear
-      ? `<div class="confirm"><span>Delete all saved games?</span><button class="btn" type="button" id="btn-clear-yes">Yes, delete</button><button class="btn" type="button" id="btn-clear-no">Cancel</button></div>`
+      ? `<div class="confirm"><span>Delete all saved games? Download a backup first if you want to keep them.</span><button class="btn" type="button" id="btn-clear-yes">Yes, delete</button><button class="btn" type="button" id="btn-clear-no">Cancel</button></div>`
       : `<div><button class="btn" type="button" id="btn-clear">Clear history</button></div>`;
-    pane.innerHTML = html;
+    pane.innerHTML = html + backupSection();
+  }
+
+  /* ---------- Backup and restore ---------- */
+  function backupSection() {
+    const n = savedGames.length;
+    let html = `<div class="section backup"><h4>Save and backup</h4>
+      <p class="saved-note"><span class="dot great"></span>Autosaved on this device: ${n} game${n === 1 ? "" : "s"}, plus the game you are playing now.</p>
+      <p class="empty" style="margin:0;font-size:13px">Data on this device can be lost if you clear your browser, change browser, or use a different link. Download a backup now and then. You can restore it on any device.</p>
+      <div class="controls">
+        <button class="btn" type="button" id="btn-export"${n ? "" : " disabled"}>Download backup (.json)</button>
+        <button class="btn" type="button" id="btn-copy"${n ? "" : " disabled"}>Copy backup</button>
+        <label class="btn filebtn" for="backup-file">Restore from file</label>
+        <input type="file" id="backup-file" accept=".json,application/json" hidden>
+        <button class="btn" type="button" id="btn-paste">Paste backup</button>
+      </div>`;
+    if (S.showPaste) {
+      html += `<textarea id="backup-text" rows="5" placeholder="Paste your backup text here"></textarea>
+        <div class="controls"><button class="btn primary" type="button" id="btn-paste-go">Restore</button><button class="btn" type="button" id="btn-paste-cancel">Cancel</button></div>`;
+    }
+    if (S.backupMsg) html += `<p class="backup-msg" role="status">${esc(S.backupMsg)}</p>`;
+    return html + `</div>`;
+  }
+
+  function backupText() {
+    return JSON.stringify({ app: "Opening Coach", version: 1, exportedAt: new Date().toISOString(), games: savedGames }, null, 2);
+  }
+  function setBackupMsg(m) { S.backupMsg = m; renderStyle(); }
+
+  async function exportBackup() {
+    const name = `opening-coach-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    const text = backupText();
+    let file = null;
+    try { file = new File([text], name, { type: "application/json" }); } catch (e) { /* old browser */ }
+    // On phones, the share sheet lets you "Save to Files".
+    const phone = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+    if (phone && file && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: name });
+        return setBackupMsg(`Backup shared: ${name}. Choose "Save to Files" to keep it.`);
+      } catch (e) {
+        if (e && e.name === "AbortError") return;
+      }
+    }
+    try {
+      const url = URL.createObjectURL(file || new Blob([text], { type: "application/json" }));
+      const a = document.createElement("a");
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      setBackupMsg(`Downloaded ${name}. If no file appeared, use Copy backup and paste it into a note.`);
+    } catch (e) {
+      setBackupMsg("This page cannot download files. Use Copy backup and paste it into a note.");
+    }
+  }
+
+  function copyBackup() {
+    const text = backupText();
+    const fallback = () => {
+      // Show the text so the player can copy it by hand.
+      S.showPaste = true;
+      S.backupMsg = "Copy did not work here. The backup text is selected above: copy it yourself.";
+      renderStyle();
+      const t = $("backup-text");
+      t.value = text;
+      t.select();
+    };
+    try {
+      navigator.clipboard.writeText(text).then(
+        () => setBackupMsg(`Copied ${savedGames.length} games. Paste them into a note or email to keep them safe.`),
+        fallback);
+    } catch (e) { fallback(); }
+  }
+
+  function importBackup(text) {
+    let data;
+    try { data = JSON.parse(text); } catch (e) { return setBackupMsg("That is not a valid backup. Check that you copied all of the text."); }
+    const list = Array.isArray(data) ? data : data && Array.isArray(data.games) ? data.games : null;
+    if (!list) return setBackupMsg("That file has no games in it. Pick an Opening Coach backup file.");
+    const have = new Set(savedGames.map(gameKey));
+    let added = 0, skipped = 0, bad = 0;
+    for (const raw of list) {
+      const g = cleanGame(raw);
+      if (!g) { bad++; continue; }
+      const k = gameKey(g);
+      if (have.has(k)) { skipped++; continue; }
+      have.add(k); savedGames.push(g); added++;
+    }
+    savedGames.sort((a, b) => a.date - b.date);
+    const ok = saveGames(savedGames);
+    S.showPaste = false;
+    setBackupMsg(`Restored ${added} game${added === 1 ? "" : "s"}.` + (skipped ? ` ${skipped} were already here.` : "") + (bad ? ` ${bad} could not be read.` : "") + (ok ? "" : " Warning: this device could not save them."));
   }
 
   /* ---------- Tabs ---------- */
@@ -555,7 +674,38 @@
     else renderStyle();
   }
 
+  /* ---------- Autosave the game in progress ---------- */
+  function saveCurrent() {
+    try {
+      localStorage.setItem(CURRENT_KEY, JSON.stringify({
+        v: 1, moves: S.game.history(), opp: S.opp, userColor: S.userColor, orientation: S.orientation,
+        reviews: S.reviews, over: S.over, result: S.result, endText: S.endText, saved: S.saved, practice: S.practice,
+      }));
+    } catch (e) { /* storage full or blocked */ }
+  }
+  function restoreCurrent() {
+    let d;
+    try { d = JSON.parse(localStorage.getItem(CURRENT_KEY) || "null"); } catch (e) { return false; }
+    if (!d || d.v !== 1 || !Array.isArray(d.moves)) return false;
+    const g = new Chess();
+    for (const san of d.moves) if (!g.move(san)) return false;
+    const opps = ["easy", "medium", "hard", "friend"];
+    S.game = g;
+    S.opp = opps.includes(d.opp) ? d.opp : "medium";
+    S.userColor = d.userColor === "b" ? "b" : "w";
+    S.orientation = d.orientation === "b" ? "b" : "w";
+    S.reviews = Array.isArray(d.reviews) ? d.reviews.filter((r) => r && typeof r === "object" && r.ply < d.moves.length) : [];
+    S.over = !!d.over; S.result = d.result || null; S.endText = typeof d.endText === "string" ? d.endText : ""; S.saved = !!d.saved;
+    S.practice = d.practice && Array.isArray(d.practice.list) ? { name: String(d.practice.name), list: d.practice.list.map(String), side: d.practice.side === "b" ? "b" : "w" } : null;
+    const hv = g.history({ verbose: true });
+    S.last = hv[hv.length - 1] || null;
+    $("opt-opp").value = S.opp;
+    $("opt-color").value = S.userColor;
+    return true;
+  }
+
   function render() {
+    saveCurrent();
     renderBoard();
     renderPlayers();
     renderBanner();
@@ -582,6 +732,15 @@
   $("btn-resign").addEventListener("click", resign);
   $("btn-flip").addEventListener("click", () => { S.orientation = S.orientation === "w" ? "b" : "w"; render(); });
   ["coach", "openings", "style"].forEach((k) => $("tab-" + k).addEventListener("click", () => setTab(k)));
+  $("pane-style").addEventListener("change", (ev) => {
+    if (ev.target.id !== "backup-file" || !ev.target.files[0]) return;
+    const f = ev.target.files[0];
+    if (f.size > 5 * 1024 * 1024) return setBackupMsg("That file is too big to be a backup.");
+    const r = new FileReader();
+    r.onload = () => importBackup(String(r.result));
+    r.onerror = () => setBackupMsg("Could not read that file.");
+    r.readAsText(f);
+  });
   $("pane-openings").addEventListener("input", (ev) => {
     if (ev.target.id === "open-search") { S.search = ev.target.value; renderOpeningList(); }
   });
@@ -592,9 +751,15 @@
     if (p) { startPractice(p.dataset.practice, p.dataset.side); return; }
     if (ev.target.id === "btn-clear") { S.confirmClear = true; renderStyle(); }
     if (ev.target.id === "btn-clear-no") { S.confirmClear = false; renderStyle(); }
-    if (ev.target.id === "btn-clear-yes") { savedGames = []; saveGames(savedGames); S.confirmClear = false; renderStyle(); }
+    if (ev.target.id === "btn-clear-yes") { savedGames = []; saveGames(savedGames); S.confirmClear = false; S.backupMsg = ""; renderStyle(); }
+    if (ev.target.id === "btn-export") exportBackup();
+    if (ev.target.id === "btn-copy") copyBackup();
+    if (ev.target.id === "btn-paste") { S.showPaste = true; S.backupMsg = ""; renderStyle(); $("backup-text").focus(); }
+    if (ev.target.id === "btn-paste-cancel") { S.showPaste = false; renderStyle(); }
+    if (ev.target.id === "btn-paste-go") importBackup($("backup-text").value);
   });
 
   Theme.apply();
-  newGame();
+  if (restoreCurrent()) afterMove();
+  else newGame();
 })();
