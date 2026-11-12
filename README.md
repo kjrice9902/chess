@@ -1,1 +1,27 @@
-# chess
+# Opening Coach
+
+A chess app that helps you fix your openings.
+
+## What it does
+
+- **Play chess** against the computer (easy, medium, hard) or a friend on the same screen.
+- **Names every opening move.** After each of your moves, the coach shows the name of the opening (Italian Game, Sicilian Defense, London System, and about 230 more lines).
+- **Rates each move**: Great, Good, OK, Questionable or Bad, with a short reason. Out of the known lines, it checks the basic rules: take the center, develop knights and bishops, castle early, do not move the queen or king early, do not move the same piece twice. It also warns you when a move loses material.
+- **Gives you a plan** for the opening you are in, plus a checklist (center pawn, knights out, bishops out, castle, rooks connected).
+- **Hint button** shows the next book move or the best move.
+- **Openings tab**: practice a chosen opening. The computer follows the line.
+- **My style tab**: after each game, the app saves how you opened. It finds your style (Explorer, Attacker, Builder or Strategist) and suggests openings for White and for Black that fit you.
+
+## How to run
+
+Open `index.html` in a web browser. No install needed. Your game history is saved in your browser.
+
+Pawns always promote to a queen.
+
+## Files
+
+- `js/openings.js` – the opening book (names, ratings, plans)
+- `js/coach.js` – move ratings, checklist and style profile
+- `js/engine.js` – the computer player
+- `js/app.js` – the board and screens
+- `lib/chess.js` – chess rules ([chess.js](https://github.com/jhlywa/chess.js) 0.10.3, BSD license)
