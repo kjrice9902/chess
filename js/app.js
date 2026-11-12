@@ -63,6 +63,7 @@
   function saveGames() {
     trimGames();
     scheduleCloudGames();
+    scheduleSync();
     try { localStorage.setItem(STORE_KEY, JSON.stringify(savedGames)); storage.localOk = true; } catch (e) { storage.localOk = false; }
     const snapshot = savedGames.slice();
     storage.queue = storage.queue.then(() => idbSet("games", snapshot)).then((ok) => {
@@ -121,6 +122,7 @@
   function saveMeta() {
     try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch (e) { /* ignore */ }
     scheduleCloudMeta();
+    scheduleSync();
   }
   if (!meta.since) { meta.since = Date.now(); try { localStorage.setItem(META_KEY, JSON.stringify(meta)); } catch (e) { /* ignore */ } }
   function backupDue() {
@@ -227,6 +229,207 @@
     } catch (e) {
       cloud.failed = true;
     }
+  }
+
+
+  /* ---------- Sync across devices: a private GitHub Gist (works on the GitHub Pages site) ---------- */
+  // Each device keeps a GitHub key with only the "gist" permission. All devices read and write one
+  // private gist file. Games are merged (nothing is lost), settings keep the newest values, and the
+  // newest game in progress wins.
+  const SYNC_KEY = "openingCoach.sync.v1";
+  const SYNC_FILE = "opening-coach-sync.json";
+  const sync = (() => {
+    let d = {};
+    try { d = JSON.parse(localStorage.getItem(SYNC_KEY) || "{}") || {}; } catch (e) { d = {}; }
+    return {
+      token: typeof d.token === "string" ? d.token : "", gistId: typeof d.gistId === "string" ? d.gistId : "",
+      currentAt: Number(d.currentAt) || 0, lastOk: Number(d.lastOk) || 0,
+      state: "idle", error: "", busy: false, again: false, timer: null, applying: false, curInit: false, curKey: "",
+    };
+  })();
+  const syncAvailable = () => !(window.claude && typeof window.claude.use === "function"); // the Claude viewer has its own cloud save
+  function persistSync() {
+    try { localStorage.setItem(SYNC_KEY, JSON.stringify({ token: sync.token, gistId: sync.gistId, currentAt: sync.currentAt, lastOk: sync.lastOk })); } catch (e) { /* ignore */ }
+  }
+  function scheduleSync(delay = 4000) {
+    if (!sync.token || sync.applying) return;
+    clearTimeout(sync.timer);
+    sync.timer = setTimeout(() => syncNow(), delay);
+  }
+  async function gh(path, opts = {}) {
+    const headers = { Accept: "application/vnd.github+json", Authorization: "Bearer " + sync.token };
+    if (opts.body) headers["Content-Type"] = "application/json";
+    const r = await fetch("https://api.github.com" + path, { ...opts, headers, cache: "no-store" });
+    if (!r.ok) { const e = new Error("GitHub said " + r.status); e.status = r.status; throw e; }
+    return r.status === 204 ? null : r.json();
+  }
+  async function findOrCreateGist() {
+    for (let page = 1; page <= 10; page++) {
+      const list = await gh(`/gists?per_page=100&page=${page}`);
+      if (!Array.isArray(list) || !list.length) break;
+      const hit = list.find((g) => g && g.files && g.files[SYNC_FILE]);
+      if (hit) { sync.gistId = hit.id; persistSync(); return; }
+      if (list.length < 100) break;
+    }
+    const made = await gh("/gists", {
+      method: "POST",
+      body: JSON.stringify({ description: "Opening Coach sync. Do not delete: your devices use this file.", public: false, files: { [SYNC_FILE]: { content: "{}" } } }),
+    });
+    sync.gistId = made.id; persistSync();
+  }
+  async function readGist() {
+    const g = await gh("/gists/" + sync.gistId);
+    const f = g && g.files && g.files[SYNC_FILE];
+    if (!f) return {};
+    let text = f.content;
+    if (f.truncated && f.raw_url) {
+      const r = await fetch(f.raw_url, { cache: "no-store" });
+      if (!r.ok) throw new Error("Could not read the sync file");
+      text = await r.text();
+    }
+    try { const d = JSON.parse(text || "{}"); return d && typeof d === "object" ? d : {}; } catch (e) { return {}; }
+  }
+  function curKeyOf() {
+    return JSON.stringify([S.game.history(), S.opp, S.userColor, S.over, S.result, S.practice ? S.practice.name : null]);
+  }
+  // Bring what another device saved into this one.
+  function mergeRemote(d) {
+    sync.applying = true;
+    try {
+      const m = d.meta && typeof d.meta === "object" ? d.meta : {};
+      const lb = Number(m.lastBackup) || 0, since = Number(m.since) || 0, cleared = Number(m.clearedAt) || 0;
+      if (lb > (meta.lastBackup || 0)) meta.lastBackup = lb;
+      if (since && since < meta.since) meta.since = since;
+      if (cleared > (meta.clearedAt || 0)) meta.clearedAt = cleared;
+      const cutoff = meta.clearedAt || 0;
+      let changed = false;
+      if (cutoff) {
+        const before = savedGames.length;
+        savedGames = savedGames.filter((g) => g.date > cutoff);
+        if (savedGames.length !== before) changed = true;
+      }
+      const have = new Set(savedGames.map(gameKey));
+      (Array.isArray(d.games) ? d.games : []).forEach((raw) => {
+        const g = cleanGame(raw);
+        if (g && g.date > cutoff && !have.has(gameKey(g))) { have.add(gameKey(g)); savedGames.push(g); changed = true; }
+      });
+      if (changed) { savedGames.sort((a, b) => a.date - b.date); saveGames(savedGames); }
+      saveMeta();
+      // A newer game from another device replaces this one only when you are not in the middle of playing.
+      const c = d.current;
+      const idle = S.waiting || S.over || !S.game.history().length;
+      if (c && typeof c.json === "string" && Number(c.at) > sync.currentAt && idle && !S.thinking) {
+        if (restoreCurrent(c.json)) {
+          S.selected = null; S.hint = null;
+          sync.currentAt = Number(c.at); sync.curKey = curKeyOf(); sync.curInit = true;
+          try { localStorage.setItem(CURRENT_KEY, c.json); } catch (e) { /* ignore */ }
+          changed = true;
+        }
+      }
+      if (changed) { render(); renderReminder(); }
+    } finally { sync.applying = false; }
+  }
+  async function syncNow() {
+    if (!sync.token || !syncAvailable()) return;
+    if (sync.busy) { sync.again = true; return; }
+    clearTimeout(sync.timer);
+    sync.busy = true; sync.state = "syncing"; renderSyncStatus();
+    try {
+      if (!sync.gistId) await findOrCreateGist();
+      let remote;
+      try { remote = await readGist(); } catch (e) {
+        if (e.status !== 404) throw e;
+        sync.gistId = ""; await findOrCreateGist(); remote = await readGist(); // the gist was deleted: make a new one
+      }
+      mergeRemote(remote);
+      const rc = remote.current && typeof remote.current.json === "string" ? remote.current : null;
+      let localJson = "";
+      try { localJson = localStorage.getItem(CURRENT_KEY) || ""; } catch (e) { /* ignore */ }
+      const current = rc && Number(rc.at) > sync.currentAt ? rc : localJson ? { json: localJson, at: sync.currentAt } : rc;
+      const content = { meta: { since: meta.since || 0, lastBackup: meta.lastBackup || 0, clearedAt: meta.clearedAt || 0 }, current, games: savedGames };
+      const same = JSON.stringify({ meta: remote.meta, current: remote.current, games: remote.games }) === JSON.stringify(content);
+      if (!same) {
+        const body = { app: "Opening Coach", version: 1, updatedAt: new Date().toISOString(), ...content };
+        await gh("/gists/" + sync.gistId, { method: "PATCH", body: JSON.stringify({ files: { [SYNC_FILE]: { content: JSON.stringify(body) } } }) });
+      }
+      sync.lastOk = Date.now(); sync.state = "ok"; sync.error = "";
+    } catch (e) {
+      sync.state = "error";
+      const st = e && e.status;
+      sync.error = st === 401 ? "GitHub did not accept the key. Make a new key and connect again."
+        : st === 403 || st === 404 ? "The key needs the \"gist\" permission. Make a new key with the link below."
+        : navigator.onLine === false ? "You are offline. I will sync when you are back online."
+        : "Sync did not work this time. I will try again.";
+    } finally {
+      sync.busy = false; persistSync(); renderSyncStatus();
+      if (sync.again) { sync.again = false; scheduleSync(500); }
+    }
+  }
+  async function connectSync(token) {
+    token = String(token || "").trim();
+    if (!/^[A-Za-z0-9_]{20,255}$/.test(token)) { sync.state = "error"; sync.error = "That does not look like a GitHub key. Copy all of it and try again."; renderSyncStatus(); return; }
+    sync.token = token; sync.gistId = ""; persistSync();
+    await syncNow();
+    if (sync.state === "error" && !sync.lastOk) { sync.token = ""; sync.gistId = ""; persistSync(); renderSyncStatus(); }
+  }
+  function disconnectSync() {
+    clearTimeout(sync.timer);
+    sync.token = ""; sync.gistId = ""; sync.lastOk = 0; sync.state = "idle"; sync.error = ""; persistSync(); renderSyncStatus();
+  }
+  function syncAgo() {
+    const s = Math.round((Date.now() - sync.lastOk) / 1000);
+    if (s < 60) return "just now";
+    if (s < 3600) return `${Math.round(s / 60)} min ago`;
+    if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+    return new Date(sync.lastOk).toLocaleDateString();
+  }
+  // The button in the top bar: shows if your data is synced, and syncs when pressed.
+  function renderSyncButton() {
+    const b = $("btn-sync");
+    if (!b) return;
+    if (!syncAvailable()) { b.hidden = true; return; }
+    b.hidden = false;
+    let cls, label, title;
+    if (!sync.token) { cls = "off"; label = "Sync: off"; title = "Set up sync across devices"; }
+    else if (sync.state === "syncing") { cls = "busy"; label = "Syncing…"; title = "Syncing with your other devices"; }
+    else if (sync.state === "error") { cls = "err"; label = "Not synced"; title = sync.error + " Press to try again."; }
+    else if (sync.lastOk) { cls = "ok"; label = `✓ Synced ${syncAgo()}`; title = "Press to sync now"; }
+    else { cls = "busy"; label = "Sync now"; title = "Press to sync now"; }
+    b.className = "btn sync-btn " + cls;
+    b.textContent = label;
+    b.title = title;
+    b.setAttribute("aria-label", title + ". " + label);
+  }
+  function renderSyncStatus() {
+    renderSyncButton();
+    if (S.tab === "style") renderStyle();
+  }
+  function syncSection() {
+    if (!syncAvailable()) return "";
+    const TOKEN_URL = "https://github.com/settings/tokens/new?scopes=gist&description=Opening%20Coach%20sync";
+    let html = `<div class="section sync" id="sync-section"><h4>Sync across devices</h4>`;
+    if (!sync.token) {
+      html += `<p class="empty" style="margin:0;font-size:13px">Your games and the game you are playing go to a private file in your GitHub account. Every connected device sees the same data. Do this once on each device.</p>
+        <ol class="sync-steps">
+          <li><a href="${TOKEN_URL}" target="_blank" rel="noopener">Make a GitHub key</a>. Keep only <b>gist</b> ticked. Set <b>Expiration</b> to "No expiration". Press <b>Generate token</b> and copy the key.</li>
+          <li>Paste the key here and press <b>Connect</b>. On your other devices, paste the same key.</li>
+        </ol>
+        <div class="sync-row"><input type="password" id="sync-token" placeholder="Paste your GitHub key" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn primary" type="button" id="btn-sync-connect">Connect</button></div>
+        <p class="empty" style="margin:0;font-size:12px">The key can only read and write your gists. It stays on this device.</p>`;
+      if (sync.state === "error") html += `<p class="backup-msg" role="status">${esc(sync.error)}</p>`;
+    } else {
+      const dot = sync.state === "error" ? "bad" : sync.state === "syncing" ? "ok" : "great";
+      const txt = sync.state === "syncing" ? "Syncing…" : sync.state === "error" ? sync.error : sync.lastOk ? `Synced ${syncAgo()}. ${savedGames.length.toLocaleString()} game${savedGames.length === 1 ? "" : "s"} on all connected devices.` : "Connected.";
+      html += `<p class="saved-note"><span class="dot ${dot}"></span>${esc(txt)}</p>
+        <p class="empty" style="margin:0;font-size:13px">I sync on my own when you open the app, after each game, and every 2 minutes.</p>
+        <div class="controls">
+          <button class="btn" type="button" id="btn-sync-now"${sync.busy ? " disabled" : ""}>Sync now</button>
+          <button class="btn" type="button" id="btn-sync-copy">Copy key for another device</button>
+          <button class="btn" type="button" id="btn-sync-off">Disconnect</button>
+        </div>`;
+    }
+    if (S.syncMsg) html += `<p class="backup-msg" role="status">${esc(S.syncMsg)}</p>`;
+    return html + `</div>`;
   }
 
   /* ---------- State ---------- */
@@ -823,7 +1026,7 @@
         <li>Do you castle by move 10?</li>
         <li>How often do you play random moves: edge pawns, the same piece twice, early king or queen moves?</li>
         <li>How often do you attack: checks, captures, gambits?</li></ul></div>`;
-      pane.innerHTML = html + backupSection();
+      pane.innerHTML = html + syncSection() + backupSection();
       return;
     }
     const st = prof.style;
@@ -882,7 +1085,7 @@
     html += S.confirmClear
       ? `<div class="confirm"><span>Delete all saved games${cloud.ready ? " here and in your Claude account" : ""}? Download a backup first if you want to keep them.</span><button class="btn" type="button" id="btn-clear-yes">Yes, delete</button><button class="btn" type="button" id="btn-clear-no">Cancel</button></div>`
       : `<div><button class="btn" type="button" id="btn-clear">Clear history</button></div>`;
-    pane.innerHTML = html + backupSection();
+    pane.innerHTML = html + syncSection() + backupSection();
   }
 
   /* ---------- Backup and restore ---------- */
@@ -1022,6 +1225,10 @@
     });
     try { localStorage.setItem(CURRENT_KEY, json); } catch (e) { /* storage full or blocked */ }
     scheduleCloudCurrent(json);
+    // Note the time of real changes (not just opening the app), so the newest game wins when syncing.
+    const key = curKeyOf();
+    if (!sync.curInit) { sync.curInit = true; sync.curKey = key; }
+    else if (key !== sync.curKey) { sync.curKey = key; sync.currentAt = Date.now(); persistSync(); scheduleSync(); }
   }
   function restoreCurrent(text) {
     let d;
@@ -1181,8 +1388,15 @@
     if (p) { startPractice(p.dataset.practice, p.dataset.side); return; }
     if (ev.target.id === "btn-clear") { S.confirmClear = true; renderStyle(); }
     if (ev.target.id === "btn-clear-no") { S.confirmClear = false; renderStyle(); }
-    if (ev.target.id === "btn-clear-yes") { savedGames = []; storage.trimmed = 0; saveGames(savedGames); S.confirmClear = false; S.backupMsg = ""; renderStyle(); }
+    if (ev.target.id === "btn-clear-yes") { savedGames = []; storage.trimmed = 0; meta.clearedAt = Date.now(); saveMeta(); saveGames(savedGames); S.confirmClear = false; S.backupMsg = ""; renderStyle(); }
     if (ev.target.id === "btn-export") exportBackup();
+    if (ev.target.id === "btn-sync-connect") { S.syncMsg = ""; connectSync($("sync-token").value); }
+    if (ev.target.id === "btn-sync-now") { S.syncMsg = ""; syncNow(); }
+    if (ev.target.id === "btn-sync-off") { S.syncMsg = "Disconnected. Your games stay on this device and in the GitHub file."; disconnectSync(); }
+    if (ev.target.id === "btn-sync-copy") {
+      const done = (m) => { S.syncMsg = m; renderStyle(); };
+      try { navigator.clipboard.writeText(sync.token).then(() => done("Key copied. Paste it on your other device. Keep it private, like a password."), () => done("Copy did not work here.")); } catch (e) { done("Copy did not work here."); }
+    }
     if (ev.target.id === "btn-copy") copyBackup();
     if (ev.target.id === "btn-paste") { S.showPaste = true; S.backupMsg = ""; renderStyle(); $("backup-text").focus(); }
     if (ev.target.id === "btn-paste-cancel") { S.showPaste = false; renderStyle(); }
@@ -1207,5 +1421,18 @@
     }
     saveGames(savedGames);
     await startCloud(hadLocalCurrent);
+    if (sync.token) syncNow();
   })();
+  // Top bar sync button: syncs now, or opens the setup if sync is off.
+  $("btn-sync").addEventListener("click", () => {
+    if (sync.token) { S.syncMsg = ""; syncNow(); return; }
+    setTab("style");
+    const sec = $("sync-section");
+    if (sec) { sec.scrollIntoView({ behavior: "smooth", block: "center" }); const t = $("sync-token"); if (t) t.focus({ preventScroll: true }); }
+  });
+  renderSyncButton();
+  // Sync when you come back to the app, and every 2 minutes while it is open.
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") scheduleSync(300); });
+  window.addEventListener("online", () => scheduleSync(300));
+  setInterval(() => { renderSyncButton(); if (document.visibilityState === "visible") scheduleSync(0); }, 120000);
 })();

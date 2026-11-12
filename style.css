@@ -294,3 +294,13 @@ select, input, textarea { font-size: 16px !important; }
 .start-card h2 { margin: 0; font: 800 22px/1.15 var(--font-display); text-wrap: balance; }
 .start-card p { margin: 0; color: var(--muted); font-size: 14px; }
 .btn.big { font-size: 17px; padding: 10px 26px; min-height: 46px; }
+
+/* Sync across devices */
+.sync-btn { white-space: nowrap; }
+.sync-btn.ok { color: var(--great); border-color: var(--great); }
+.sync-btn.err { color: var(--bad); border-color: var(--bad); }
+.sync-btn.busy { opacity: 0.85; }
+.sync-steps { margin: 4px 0; padding-left: 20px; font-size: 14px; display: grid; gap: 4px; }
+.sync-steps a { color: var(--accent); font-weight: 600; }
+.sync-row { display: flex; gap: 8px; }
+.sync-row input { flex: 1; min-width: 0; font-size: 16px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); }

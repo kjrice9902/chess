@@ -17,6 +17,22 @@ A chess app that helps you fix your openings.
 - **Your success**: the My style tab shows your most and least successful openings, colored by your score: Strong (green), Mixed (yellow), Weak (orange), Losing (red).
 - **My style tab**: after each game, the app saves how you opened. It finds your style (Explorer, Attacker, Builder or Strategist) and suggests openings for White and for Black that fit you.
 
+## Sync across devices
+
+Your games, settings and the game you are playing can sync between your phone, laptop and other devices. The app has no server, so it uses one **private Gist** (a small private file) in your GitHub account.
+
+1. Press **Sync: off** in the top bar (or go to **My style → Sync across devices**).
+2. Press **Make a GitHub key**. Keep only **gist** ticked, set **Expiration** to "No expiration", press **Generate token**, and copy the key.
+3. Paste the key and press **Connect**.
+4. On each other device, open the app, paste the **same key**, and press **Connect**. (On a connected device, **Copy key for another device** copies it for you.)
+
+- The top bar button shows **✓ Synced** with the time of the last sync. Press it to sync now. **Not synced** in red means the last try failed (for example, no internet).
+- The app syncs when you open it, after each change, and every 2 minutes.
+- Games from all devices are added together. Nothing is lost. **Clear history** on one device clears all of them.
+- A game in progress moves to another device only when that device is not in the middle of a game. Press **Continue game** there.
+- The key can only read and write your gists, and it stays on the device. Keep it private, like a password. If you lose it, delete it on GitHub and make a new one.
+- Sync works on the GitHub Pages site. The Claude link uses your Claude account instead.
+
 ## Saving and backups
 
 - Everything saves by itself on your device: every finished game, and every move of the game you are playing now. If you close or reload the page, your game comes back.
@@ -28,7 +44,7 @@ A chess app that helps you fix your openings.
 - Up to **50,000 games** are kept on your device (in the browser's large storage). A warning appears at 90% full (yellow) and 98% full (red). When it is full, the oldest games are removed to make room, so download a backup first. You also get a warning if your device storage or your Claude account storage runs low.
 - Every 5 days, a reminder at the top of the app asks you to download a backup. "Remind me tomorrow" hides it for one day.
 - Zoom is locked: pinch and double-tap do not zoom the app.
-- Each browser, link and home screen app keeps its own data. Use a backup to move your games between them.
+- Each browser, link and home screen app keeps its own data. Use **Sync across devices** (above) or a backup to move your games between them.
 
 ## How to run
 
