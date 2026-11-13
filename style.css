@@ -304,3 +304,28 @@ select, input, textarea { font-size: 16px !important; }
 .sync-steps a { color: var(--accent); font-weight: 600; }
 .sync-row { display: flex; gap: 8px; }
 .sync-row input { flex: 1; min-width: 0; font-size: 16px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
+
+/* The computer took one of your pieces */
+.sq.moving { z-index: 3; overflow: visible; }
+.sq.moving .pc { position: relative; z-index: 3; }
+.sq.lost::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 2;
+  box-shadow: inset 0 0 0 4px #e0352b; background: radial-gradient(circle, rgba(224, 53, 43, 0.15), rgba(224, 53, 43, 0.45));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .sq.lost::after { animation: lostPulse 0.6s ease-in-out 4 alternate; }
+  .lost-toast:not([hidden]) { animation: toastIn 0.25s ease-out; }
+}
+@keyframes lostPulse { from { opacity: 1; } to { opacity: 0.35; } }
+@keyframes toastIn { from { transform: translate(-50%, -12px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+.lost-toast {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 6;
+  display: flex; align-items: center; gap: 10px; max-width: calc(100% - 24px); width: max-content;
+  background: #b3261e; color: #fff; font-weight: 700; font-size: 15px; line-height: 1.3;
+  padding: 8px 8px 8px 10px; border-radius: 10px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.lost-icon { width: 34px; height: 34px; flex: none; background: rgba(255, 255, 255, 0.9); border-radius: 50%; display: grid; place-items: center; }
+.lost-icon .pc { width: 28px; height: 28px; }
+.lost-x { border: 0; background: rgba(255, 255, 255, 0.2); color: #fff; width: 28px; height: 28px; border-radius: 50%; font-size: 18px; line-height: 1; cursor: pointer; flex: none; }
+.status.lost { color: var(--bad); font-weight: 700; }
+.feed li.lost .t { color: var(--bad); font-weight: 700; }

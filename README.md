@@ -10,6 +10,7 @@ A chess app that helps you fix your openings.
 - **Gives you a plan** for the opening you are in, plus a checklist (center pawn, knights out, bishops out, castle, rooks connected).
 - **Hint button** shows the next book move or the best move.
 - **Reset board**: puts the pieces back to the start but keeps your side, opponent and practice line. Nothing is saved to My style. Tap it twice to confirm.
+- **Lost a piece?** When the computer takes one of your pieces, its piece slides across the board, the square flashes red, a red message shows on the board ("The computer took your knight on f3!"), and a low "thunk" sound plays. The note under the board stays until you move. Every computer move now slides, so you can see where it came from.
 - **Start when you are ready**: a new game does not start by itself. A box on the board shows your side and opponent; press **Start game** to begin. If you reopen the app during a game, press **Continue game**.
 - **Captured pieces**: the rows above and below the board show the pieces each side has taken, smallest first, plus the material lead (for example +3).
 - **Sounds**: two rising beeps when your king is in check, and falling notes with a low boom on checkmate. Turn them off with the Sound button.

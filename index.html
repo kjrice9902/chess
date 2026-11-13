@@ -15,7 +15,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@700;800&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600;700&display=swap">
-<link rel="stylesheet" href="style.css?v=202611121840">
+<link rel="stylesheet" href="style.css?v=202611131259">
 </head>
 <body>
 <div class="wrap">
@@ -57,6 +57,11 @@
       <div class="player" id="player-top"></div>
       <div class="board-frame">
         <div class="board" id="board" role="grid" aria-label="Board"></div>
+        <div class="lost-toast" id="lost-toast" role="alert" hidden>
+          <span class="lost-icon" id="lost-icon" aria-hidden="true"></span>
+          <span id="lost-text"></span>
+          <button type="button" class="lost-x" id="lost-x" aria-label="Close">×</button>
+        </div>
         <div class="start-overlay" id="start-overlay" hidden>
           <div class="start-card">
             <h2 id="start-title">Ready to play?</h2>
@@ -89,11 +94,11 @@
     </aside>
   </main>
 </div>
-<script src="lib/chess.js?v=202611121840"></script>
-<script src="js/openings.js?v=202611121840"></script>
-<script src="js/engine.js?v=202611121840"></script>
-<script src="js/coach.js?v=202611121840"></script>
-<script src="js/theme.js?v=202611121840"></script>
-<script src="js/app.js?v=202611121840"></script>
+<script src="lib/chess.js?v=202611131259"></script>
+<script src="js/openings.js?v=202611131259"></script>
+<script src="js/engine.js?v=202611131259"></script>
+<script src="js/coach.js?v=202611131259"></script>
+<script src="js/theme.js?v=202611131259"></script>
+<script src="js/app.js?v=202611131259"></script>
 </body>
 </html>

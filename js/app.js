@@ -540,6 +540,8 @@
       if (S.selected === sq) cls.push("sel");
       if (targets[sq]) cls.push("tgt", targets[sq].captured ? "cap" : "");
       if (checkSq === sq) cls.push("check");
+      const L = lostNow();
+      if (L && L.sq === sq) cls.push("lost");
       let inner = "";
       if (p) inner += Theme.pieceSvg(p.color, p.type);
       if (i >= 56) inner += `<span class="coord f">${sq[0]}</span>`;
@@ -548,6 +550,7 @@
       html += `<button type="button" role="gridcell" class="${cls.join(" ").trim()}" data-sq="${sq}" aria-label="${name}">${inner}</button>`;
     });
     boardEl.innerHTML = html;
+    animateLastMove();
   }
 
   function onSquare(sq) {
@@ -608,11 +611,55 @@
     const after = openingName();
     const note = { by: "opp", san: mv.san, ply: hist.length, moveNo: Math.floor(hist.length / 2) + 1, color: mv.color, text: "" };
     if (after.name && after.name !== before && !after.off) note.text = `Opening is now: ${after.name}`;
+    const ply = S.game.history().length;
+    S.anim = { from: mv.from, to: mv.to, ply, done: false };
+    if (mv.captured) {
+      const name = PIECE_NAME[mv.captured];
+      S.lost = { type: mv.captured, color: mv.color === "w" ? "b" : "w", sq: mv.to, ply, name };
+      note.text = (note.text ? note.text + " · " : "") + `Took your ${name} on ${mv.to}.`;
+      note.lost = true;
+    }
     S.reviews.push(note);
     S.last = mv;
     S.thinking = false;
-    moveSound();
+    moveSound(mv.captured);
     afterMove();
+  }
+
+  const PIECE_NAME = ({ k: "king", q: "queen", r: "rook", b: "bishop", n: "knight", p: "pawn" });
+  // The "you lost a piece" notice is only valid right after the computer's capture.
+  const lostNow = () => S.lost && S.lost.ply === S.game.history().length && !S.waiting ? S.lost : null;
+  let lostTimer = null;
+  function renderLost() {
+    const el = $("lost-toast");
+    const L = lostNow();
+    if (!L || L.closed) { el.hidden = true; return; }
+    if (!L.shown) {
+      L.shown = true;
+      clearTimeout(lostTimer);
+      lostTimer = setTimeout(() => { if (lostNow() === L) { L.closed = true; renderLost(); } }, 4500);
+    }
+    $("lost-icon").innerHTML = Theme.pieceSvg(L.color, L.type);
+    $("lost-text").textContent = `The computer took your ${L.name} on ${L.sq}!`;
+    el.hidden = false;
+  }
+  // Slide the computer's piece from where it was to where it went.
+  function animateLastMove() {
+    const A = S.anim;
+    if (!A || A.done || A.ply !== S.game.history().length) return;
+    A.done = true;
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const fromEl = document.querySelector(`[data-sq="${A.from}"]`), toEl = document.querySelector(`[data-sq="${A.to}"]`);
+    const pc = toEl && toEl.querySelector(".pc");
+    if (!fromEl || !pc) return;
+    const a = fromEl.getBoundingClientRect(), b = toEl.getBoundingClientRect();
+    toEl.classList.add("moving");
+    pc.style.transition = "none";
+    pc.style.transform = `translate(${a.left - b.left}px, ${a.top - b.top}px)`;
+    pc.getBoundingClientRect(); // apply the start position before the slide
+    pc.style.transition = "transform 420ms cubic-bezier(.3,.7,.3,1)";
+    pc.style.transform = "";
+    setTimeout(() => toEl.classList.remove("moving"), 450);
   }
 
   /* ---------- Reset board: same game settings, pieces back to the start, nothing saved ---------- */
@@ -676,12 +723,20 @@
     tone(98, t + 0.7, 1.4, "sine", 0.3);
     tone(196, t + 0.7, 1.1, "triangle", 0.1);
   }
-  function moveSound() {
+  // Capture of your piece: a low knock, then a short drop.
+  function playLost() {
+    const t = audio.currentTime + 0.02;
+    tone(330, t, 0.09, "square", 0.1);
+    tone(165, t + 0.08, 0.32, "triangle", 0.22);
+  }
+  function moveSound(captured) {
     if (!soundOn || !audio) return;
     try {
       const g = S.game;
+      const mine = !friend() && g.turn() === S.userColor; // the computer just moved
       if (g.in_checkmate()) playMate();
-      else if (g.in_check() && (friend() || g.turn() === S.userColor)) playCheck(); // your king is in check
+      else if (g.in_check() && (friend() || g.turn() === S.userColor)) { if (captured && mine) playLost(); setTimeout(() => { try { playCheck(); } catch (e) { /* ignore */ } }, captured && mine ? 380 : 0); } // your king is in check
+      else if (captured && mine) playLost();
     } catch (e) { /* sound is optional */ }
   }
   function renderSoundButton() {
@@ -900,6 +955,10 @@
       const extra = S.saved ? " Saved to My style." : "";
       el.textContent = S.endText + extra;
     } else if (S.waiting) el.textContent = S.game.history().length ? "Press Continue game when you are ready." : "Press Start game when you are ready.";
+    else if (lostNow()) {
+      el.textContent = `You lost your ${lostNow().name} on ${lostNow().sq}.` + (S.game.in_check() ? " Check!" : "");
+      el.className = "status lost";
+    }
     else if (S.game.in_check()) el.textContent = "Check!";
     else el.textContent = "";
     $("btn-resign").disabled = S.over || S.waiting || friend();
@@ -962,7 +1021,7 @@
           const t = x.inOpening ? x.title : x.flags.blunder ? "Loses material" : "";
           html += `<li><span class="n">${num}</span><span class="s"><span class="dot ${x.verdict}"></span>${esc(x.san)}</span><span class="t">${esc(x.label)}${t ? " · " + esc(t) : ""}</span></li>`;
         } else {
-          html += `<li class="opp"><span class="n">${num}</span><span class="s">${esc(x.san)}</span><span class="t">${friend() ? "" : "Opponent"}${x.text ? " · " + esc(x.text) : ""}</span></li>`;
+          html += `<li class="opp${x.lost ? " lost" : ""}"><span class="n">${num}</span><span class="s">${esc(x.san)}</span><span class="t">${friend() ? "" : "Opponent"}${x.text ? " · " + esc(x.text) : ""}</span></li>`;
         }
       });
       html += `</ul>`;
@@ -1307,6 +1366,7 @@
 
   function render() {
     renderStartOverlay();
+    renderLost();
     renderReminder();
     renderAlerts();
     saveCurrent();
@@ -1333,6 +1393,7 @@
   });
   $("btn-new").addEventListener("click", () => newGame());
   $("btn-start").addEventListener("click", startGame);
+  $("lost-x").addEventListener("click", () => { if (S.lost) S.lost.closed = true; renderLost(); });
   // While a new game waits for Start, the menus change it right away.
   ["opt-color", "opt-opp"].forEach((id) => $(id).addEventListener("change", () => {
     if (S.waiting && !S.game.history().length) newGame();
