@@ -1104,7 +1104,14 @@
       ${practiceButton(st.black, "b", "As Black vs 1.d4")}</div></div>`;
 
     const R = prof.results;
-    html += `<div class="section"><h4>Results</h4><p>${R.w} win${R.w === 1 ? "" : "s"} · ${R.l} loss${R.l === 1 ? "" : "es"} · ${R.d} draw${R.d === 1 ? "" : "s"}</p></div>`;
+    html += `<div class="section"><h4>Results</h4><p>${R.w} win${R.w === 1 ? "" : "s"} · ${R.l} loss${R.l === 1 ? "" : "es"} · ${R.d} draw${R.d === 1 ? "" : "s"}</p>`;
+    const lv = levelRows(R.levels);
+    if (lv.length) {
+      html += `<div class="tablewrap"><table class="rec"><thead><tr><th>Computer level</th><th class="num">W</th><th class="num">L</th><th class="num">D</th></tr></thead><tbody>`;
+      lv.forEach(([label, c]) => (html += `<tr><td>${esc(label)}</td><td class="num">${c.w}</td><td class="num">${c.l}</td><td class="num">${c.d}</td></tr>`));
+      html += `</tbody></table></div>`;
+    }
+    html += `</div>`;
 
     const firsts = Object.entries(prof.firsts).sort((a, b) => b[1] - a[1]).slice(0, 6);
     if (firsts.length) {
@@ -1131,20 +1138,39 @@
       html += `<p class="empty">Finish a game (win, lose or draw) to see which openings work for you.</p>`;
     } else {
       const best = rated[0], worst = rated[rated.length - 1];
-      const line = (o, title) => `<div class="succ"><span class="chip ${o.tier.v}">${o.tier.label}</span><div><strong>${title}: ${esc(o.name)}</strong><small>${o.w} win${o.w === 1 ? "" : "s"}, ${o.l} loss${o.l === 1 ? "" : "es"}, ${o.d} draw${o.d === 1 ? "" : "s"} · ${Math.round(o.score * 100)}% score</small></div></div>`;
+      const line = (o, title) => `<div class="succ"><span class="chip ${o.tier.v}">${o.tier.label}</span><div><strong>${title}: ${esc(o.name)}</strong><small>${o.w} win${o.w === 1 ? "" : "s"}, ${o.l} loss${o.l === 1 ? "" : "es"}, ${o.d} draw${o.d === 1 ? "" : "s"} · ${Math.round(o.score * 100)}% score</small><small class="lvls">${esc(levelText(o.levels))}</small></div></div>`;
       html += line(best, "Most successful");
       if (rated.length > 1 && worst !== best) html += line(worst, "Least successful");
       if (rated.length < 2) html += `<p class="empty" style="font-size:13px">Play different openings to compare them.</p>`;
     }
     html += `</div>`;
-    html += `<div class="section"><h4>All your openings</h4><div class="tablewrap"><table class="rec"><thead><tr><th>Opening</th><th class="num">W</th><th class="num">L</th><th class="num">D</th><th>Result</th></tr></thead><tbody>`;
-    ops.forEach((o) => (html += `<tr><td><span class="dot ${o.tier ? o.tier.v : ""}"></span>${esc(o.name)}</td><td class="num">${o.w}</td><td class="num">${o.l}</td><td class="num">${o.d}</td><td>${o.tier ? `<span class="chip ${o.tier.v}">${o.tier.label}</span>` : `<span class="empty">Not finished</span>`}</td></tr>`));
+    html += `<div class="section"><h4>All your openings</h4><div class="tablewrap"><table class="rec"><thead><tr><th>Opening</th><th class="num">W</th><th class="num">L</th><th class="num">D</th><th>Result</th><th>Level</th></tr></thead><tbody>`;
+    ops.forEach((o) => (html += `<tr><td><span class="dot ${o.tier ? o.tier.v : ""}"></span>${esc(o.name)}</td><td class="num">${o.w}</td><td class="num">${o.l}</td><td class="num">${o.d}</td><td>${o.tier ? `<span class="chip ${o.tier.v}">${o.tier.label}</span>` : `<span class="empty">Not finished</span>`}</td><td class="lvls">${esc(levelText(o.levels))}</td></tr>`));
     html += `</tbody></table></div><p class="empty" style="margin:8px 0 0;font-size:13px">Score: a win counts 1, a draw counts half. Strong = 60% or more, Mixed = 40–59%, Weak = 20–39%, Losing = under 20%.</p></div>`;
 
     html += S.confirmClear
       ? `<div class="confirm"><span>Delete all saved games${cloud.ready ? " here and in your Claude account" : ""}? Download a backup first if you want to keep them.</span><button class="btn" type="button" id="btn-clear-yes">Yes, delete</button><button class="btn" type="button" id="btn-clear-no">Cancel</button></div>`
       : `<div><button class="btn" type="button" id="btn-clear">Clear history</button></div>`;
     pane.innerHTML = html + syncSection() + backupSection();
+  }
+
+  /* ---------- Results by computer level ---------- */
+  // Levels in order from easiest to hardest; games saved before levels were stored show as "unknown".
+  function levelRows(levels) {
+    if (!levels) return [];
+    const order = Engine.LEVEL_ORDER.concat(Object.keys(levels).filter((k) => !Engine.LEVEL_ORDER.includes(k)));
+    return order.filter((k) => levels[k] && levels[k].w + levels[k].l + levels[k].d > 0)
+      .map((k) => [Engine.LEVELS[k] ? Engine.LEVELS[k].label : "unknown level", levels[k]]);
+  }
+  // For example: "easy: 1 win · medium: 3 losses"
+  function levelText(levels) {
+    return levelRows(levels).map(([label, c]) => {
+      const parts = [];
+      if (c.w) parts.push(`${c.w} win${c.w === 1 ? "" : "s"}`);
+      if (c.l) parts.push(`${c.l} loss${c.l === 1 ? "" : "es"}`);
+      if (c.d) parts.push(`${c.d} draw${c.d === 1 ? "" : "s"}`);
+      return `${label}: ${parts.join(", ")}`;
+    }).join(" · ");
   }
 
   /* ---------- Backup and restore ---------- */

@@ -263,6 +263,14 @@
     else if (castled >= 0.6 && develop >= 0.45) key = "builder";
     else key = "strategist";
 
+    function countResult(into, g) {
+      const k = g.result === "win" ? "w" : g.result === "loss" ? "l" : g.result === "draw" ? "d" : null;
+      if (!k) return;
+      into[k]++;
+      const lvl = g.level || "unknown";
+      into.levels[lvl] = into.levels[lvl] || { w: 0, l: 0, d: 0 };
+      into.levels[lvl][k]++;
+    }
     const firsts = {};
     games.forEach((g) => {
       if (!g.firstMove) return;
@@ -272,15 +280,14 @@
     const openings = {};
     games.forEach((g) => {
       const k = g.opening || "Unnamed opening";
-      openings[k] = openings[k] || { w: 0, l: 0, d: 0, n: 0 };
+      openings[k] = openings[k] || { w: 0, l: 0, d: 0, n: 0, levels: {} };
       openings[k].n++;
-      if (g.result === "win") openings[k].w++;
-      else if (g.result === "loss") openings[k].l++;
-      else if (g.result === "draw") openings[k].d++;
+      countResult(openings[k], g);
     });
 
-    const res = { w: 0, l: 0, d: 0 };
-    games.forEach((g) => { if (g.result === "win") res.w++; else if (g.result === "loss") res.l++; else if (g.result === "draw") res.d++; });
+    // Wins, losses and draws, also split by the computer level you played against.
+    const res = { w: 0, l: 0, d: 0, levels: {} };
+    games.forEach((g) => countResult(res, g));
 
     return { key, style: STYLES[key], meters, firsts, openings, results: res, games: games.length, blunderRate };
   }
