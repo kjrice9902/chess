@@ -10,6 +10,7 @@ A chess app that helps you fix your openings.
 - **Gives you a plan** for the opening you are in, plus a checklist (center pawn, knights out, bishops out, castle, rooks connected).
 - **Hint button** shows the next book move or the best move.
 - **Reset board**: puts the pieces back to the start but keeps your side, opponent and practice line. Nothing is saved to My style. Tap it twice to confirm.
+- **Castling and en passant**: both follow the full chess rules. To castle, tap your king, then tap the square two steps to the side (g1/c1) or tap the rook. If castling is not allowed, the line under the board says why (king or rook already moved, a piece is in the way, you are in check, or an enemy piece attacks a square the king must cross).
 - **Results by level**: My style shows your wins, losses and draws for each computer level (super easy to hard). Each opening also shows which level you played it against, for example "easy: 1 win · medium: 2 losses".
 - **Lost a piece?** When the computer takes one of your pieces, its piece slides across the board, the square flashes red, a red message shows on the board ("The computer took your knight on f3!"), and a low "thunk" sound plays. The note under the board stays until you move. Every computer move now slides, so you can see where it came from.
 - **Start when you are ready**: a new game does not start by itself. A box on the board shows your side and opponent; press **Start game** to begin. If you reopen the app during a game, press **Continue game**.

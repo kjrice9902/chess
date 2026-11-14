@@ -556,16 +556,66 @@
   function onSquare(sq) {
     if (S.waiting || S.over || S.thinking || !isUserTurn()) return;
     const g = S.game;
+    const hadTip = !!S.tip;
+    S.tip = null;
     if (S.selected) {
       const mv = g.moves({ square: S.selected, verbose: true }).find((m) => m.to === sq);
       if (mv) { userMove(S.selected, sq); return; }
+      // Castling: you can also tap the rook. If castling is not allowed, say why.
+      const c = castleTry(S.selected, sq);
+      if (c && c.move) { userMove(S.selected, c.move.to); return; }
+      if (c && c.why) { S.tip = c.why; S.selected = null; renderBoard(); renderStatus(); return; }
     }
+    if (hadTip) renderStatus();
     const p = g.get(sq);
     S.selected = p && p.color === g.turn() && S.selected !== sq ? sq : null;
     renderBoard();
   }
 
   /* ---------- Moves ---------- */
+  /* ---------- Castling help ---------- */
+  const NAMES = { k: "king", q: "queen", r: "rook", b: "bishop", n: "knight", p: "pawn" };
+  // Which enemy piece attacks this square? (null if none)
+  function attackerOf(sq, enemy) {
+    const parts = S.game.fen().split(" ");
+    const t = new Chess(parts[0] + ` ${enemy} - - 0 1`);
+    t.remove(sq);
+    t.put({ type: "q", color: enemy === "w" ? "b" : "w" }, sq); // a piece to "capture", so pawns count too
+    const hit = t.moves({ verbose: true, legal: false }).find((m) => m.to === sq);
+    return hit ? { sq: hit.from, name: NAMES[hit.piece] } : null;
+  }
+  // You tapped the king, then a castling square (c1/g1) or your own rook. Returns the move, or the reason it is not allowed.
+  function castleTry(from, sq) {
+    const g = S.game, me = g.turn(), rank = me === "w" ? "1" : "8";
+    const king = g.get(from);
+    if (!king || king.type !== "k" || from !== "e" + rank || sq[1] !== rank) return null;
+    const target = g.get(sq);
+    let side = null;
+    if (sq === "g" + rank || (sq === "h" + rank && target && target.type === "r" && target.color === me)) side = "k";
+    if (sq === "c" + rank || (sq === "a" + rank && target && target.type === "r" && target.color === me)) side = "q";
+    if (!side) return null;
+    const kTo = (side === "k" ? "g" : "c") + rank;
+    const move = g.moves({ square: from, verbose: true }).find((m) => m.to === kTo && /[kq]/.test(m.flags));
+    if (move) return { move };
+    const sideName = side === "k" ? "kingside (short)" : "queenside (long)";
+    const rights = g.fen().split(" ")[2];
+    const flag = me === "w" ? side.toUpperCase() : side;
+    if (!rights.includes(flag)) {
+      const kingMoved = g.history({ verbose: true }).some((m) => m.color === me && m.piece === "k");
+      return { why: kingMoved ? "You can't castle: your king has already moved this game." : `You can't castle ${sideName}: that rook has already moved or was taken.` };
+    }
+    if (g.in_check()) return { why: "You can't castle while your king is in check." };
+    const between = side === "k" ? ["f", "g"] : ["b", "c", "d"];
+    const blocker = between.map((f) => f + rank).find((x) => g.get(x));
+    if (blocker) return { why: `You can't castle ${sideName} yet: your ${NAMES[g.get(blocker).type]} on ${blocker} is in the way.` };
+    const enemy = me === "w" ? "b" : "w";
+    for (const x of (side === "k" ? ["f", "g"] : ["d", "c"]).map((f) => f + rank)) {
+      const a = attackerOf(x, enemy);
+      if (a) return { why: `You can't castle ${sideName} now: the enemy ${a.name} on ${a.sq} attacks ${x}, and your king may not cross or land on an attacked square.` };
+    }
+    return { why: "You can't castle here right now." };
+  }
+
   function userMove(from, to) {
     const g = S.game;
     const fenBefore = g.fen();
@@ -678,7 +728,7 @@
     S.selected = S.last = S.hint = null;
     S.thinking = S.over = S.saved = false;
     S.result = null; S.endText = "";
-    S.waiting = true; // wait for Start again
+    S.waiting = true; S.tip = null; // wait for Start again
     afterMove();
   }
 
@@ -807,7 +857,7 @@
     S.reviews = [];
     S.thinking = S.over = S.saved = false;
     S.result = null; S.endText = "";
-    S.waiting = true; // the game starts when the player presses Start
+    S.waiting = true; S.tip = null; // the game starts when the player presses Start
     setTab("coach");
     afterMove();
   }
@@ -954,7 +1004,8 @@
     if (S.over) {
       const extra = S.saved ? " Saved to My style." : "";
       el.textContent = S.endText + extra;
-    } else if (S.waiting) el.textContent = S.game.history().length ? "Press Continue game when you are ready." : "Press Start game when you are ready.";
+    } else if (S.tip) { el.textContent = S.tip; el.className = "status tip"; }
+    else if (S.waiting) el.textContent = S.game.history().length ? "Press Continue game when you are ready." : "Press Start game when you are ready.";
     else if (lostNow()) {
       el.textContent = `You lost your ${lostNow().name} on ${lostNow().sq}.` + (S.game.in_check() ? " Check!" : "");
       el.className = "status lost";

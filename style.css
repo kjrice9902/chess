@@ -331,3 +331,4 @@ select, input, textarea { font-size: 16px !important; }
 .feed li.lost .t { color: var(--bad); font-weight: 700; }
 table.rec td.lvls { font-size: 12px; color: var(--muted); min-width: 9em; }
 .succ small.lvls { margin-top: 2px; }
+.status.tip { color: var(--ink); font-weight: 600; }
